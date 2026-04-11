@@ -287,8 +287,11 @@ function Onboarding({onComplete}){
 
   const steps=[
     <div key="s0">
-      <p style={{margin:"0 0 4px",fontSize:22,fontWeight:600,color:T.textPrimary}}>Welcome 👋</p>
-      <p style={{margin:"0 0 24px",fontSize:14,color:T.textSecondary,lineHeight:1.6}}>Show Me The Money — your personal finance tracker. Setup takes about a minute.</p>
+      <div style={{textAlign:"center",marginBottom:28}}>
+        <div style={{fontSize:11,letterSpacing:3,textTransform:"uppercase",color:T.accent,fontFamily:"'DM Mono'",marginBottom:8,opacity:.8}}>Welcome to</div>
+        <div style={{fontSize:28,fontWeight:600,color:T.textPrimary,letterSpacing:-0.5,lineHeight:1.2}}>Show Me The Money</div>
+        <div style={{fontSize:13,color:T.textSecondary,marginTop:8,lineHeight:1.6}}>Your personal finance tracker. Import statements, track spending, understand your money.</div>
+      </div>
       <div style={{display:"flex",justifyContent:"center",marginBottom:20}}>
         <div onClick={()=>avatarRef.current.click()} style={{width:72,height:72,borderRadius:"50%",background:T.accentMuted,border:`2px dashed ${T.accentBorder}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",overflow:"hidden"}}>
           {p.avatar?<img src={p.avatar} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span style={{fontSize:28,color:T.accent,opacity:.7}}>+</span>}
@@ -519,11 +522,17 @@ export default function App(){
               {profile.avatar?<img src={profile.avatar} alt="" style={{width:34,height:34,borderRadius:"50%",objectFit:"cover"}}/>
                 :<div style={{width:34,height:34,borderRadius:"50%",background:T.accentMuted,border:`1px solid ${T.accentBorder}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,color:T.accent,fontWeight:600}}>{profile.name?profile.name[0].toUpperCase():"?"}</div>}
               <div>
-                <div style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>{profile.name||"Show Me The Money"}</div>
+                <div style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>{profile.name||"—"}</div>
                 {profile.occupation&&<div style={{fontSize:11,color:T.textMuted}}>{profile.occupation}</div>}
               </div>
             </div>
-            <MonthPicker value={selectedMonth} onChange={setSelectedMonth}/>
+            <div style={{display:"flex",alignItems:"center",gap:12}}>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:13,fontWeight:700,color:T.accent,letterSpacing:-0.3,lineHeight:1}}>Show Me</div>
+                <div style={{fontSize:13,fontWeight:700,color:T.accent,letterSpacing:-0.3,lineHeight:1}}>The Money</div>
+              </div>
+              <MonthPicker value={selectedMonth} onChange={setSelectedMonth}/>
+            </div>
           </div>
           <div style={{display:"flex",gap:0,overflowX:"auto"}}>
             {TABS.map(([id,label])=><button key={id} onClick={()=>setTab(id)} style={{padding:"9px 13px",background:"none",border:"none",borderBottom:`2px solid ${tab===id?T.accent:"transparent"}`,color:tab===id?T.accent:T.textMuted,fontFamily:"inherit",fontSize:12,fontWeight:500,cursor:"pointer",whiteSpace:"nowrap",transition:"color .15s",position:"relative"}}>
