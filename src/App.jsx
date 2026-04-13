@@ -749,7 +749,7 @@ export default function App(){
       if(msg.includes("504")||msg.includes("timeout")) setUploadMsg("⚠ Request timed out. Try a smaller file or CSV export.");
       else if(msg.includes("API key")) setUploadMsg("⚠ API key not configured on server.");
       else if(msg.includes("No transactions")) setUploadMsg("⚠ No transactions found. Check the file has statement data.");
-      else setUploadMsg(`⚠ ${msg}`);
+      setUploadMsg(`⚠ ${err.message} [${err.name}]`);
     }
     finally{ setUploading(false); e.target.value=""; setTimeout(()=>setUploadMsg(""),10000); }
   };
