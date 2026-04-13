@@ -614,7 +614,7 @@ export default function App(){
   const getMD=useCallback(m=>monthlyData[m]||{txs:[],incomeOverrides:{},fixedOverrides:null},[monthlyData]);
   const md=useMemo(()=>getMD(selectedMonth),[getMD,selectedMonth]);
   const committedTxs=md.txs||[];
-  const incomeStreams=profile?.incomeStreams||DEFAULT_STREAMS;
+  const incomeStreams=profile?.incomeStreams||[];
   const monthIncomeOverrides=md.incomeOverrides||{};
   const monthFixed=md.fixedOverrides||profile?.fixedCommitments||[];
   const monthIncomeTotal=useMemo(()=>totalIncome(incomeStreams,monthIncomeOverrides),[incomeStreams,monthIncomeOverrides]);
