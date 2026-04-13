@@ -729,8 +729,12 @@ export default function App(){
     try {
       const base64=await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(",")[1]); r.onerror=rej; r.readAsDataURL(file); });
       setUploadMsg("Claude is parsing your transactions — this may take up to a minute for large statements…");
-      const prompt=`You are a bank statement parser. Extract ALL transactions without filtering — debits, credits, fees, everything. Return ONLY a valid JSON array, no markdown, no backticks, no explanation. Each object must have exactly: { "date":"YYYY-MM-DD", "description":"cleaned readable merchant name", "amount": positive number, "category": one of [${CATEGORIES.map(c=>JSON.stringify(c)).join(",")}] }. If the statement covers multiple months, include all transactions with their correct dates. Output ONLY the JSON array.`;
-      const content=file.name.toLowerCase().endsWith(".pdf")?[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:prompt}]:`${prompt}\n\nStatement:\n${atob(base64).slice(0,8000)}`;
+      const prompt=`You are a bank statement parser. In this statement, credits are marked with "CR" after the amount.
+Rules:
+1. Include ALL transactions — both debits and credits
+2. Debits (no CR) = positive amount
+3. Credits (with CR) = negative amount
+Return ONLY a valid JSON array, no markdown, no backticks, no explanation. Each object must have exactly: { "date":"YYYY-MM-DD", "description":"cleaned readable merchant name", "amount": number (negative if CR), "category": one of [${CATEGORIES.map(c=>JSON.stringify(c)).join(",")}] }. Output ONLY the JSON array.`;      const content=file.name.toLowerCase().endsWith(".pdf")?[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:prompt}]:`${prompt}\n\nStatement:\n${atob(base64).slice(0,8000)}`;
       const bodyStr=JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:4000,messages:[{role:"user",content}]});
 console.log("Payload size:", (bodyStr.length/1024).toFixed(1), "kb");
 const res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:bodyStr});
@@ -739,7 +743,15 @@ const res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"appl
       if(data.error) throw new Error(data.error);
       const raw=data.content?.map(b=>b.text||"").join("").trim().replace(/^```json|^```|```$/gm,"").trim();
       const parsed=JSON.parse(raw); if(!Array.isArray(parsed)||!parsed.length) throw new Error("No transactions found in statement");
-      const imported=parsed.map((t,i)=>{ const cat=CATEGORIES.includes(t.category)?t.category:"📦 Other"; const reason=habitReason({description:(t.description||"").toLowerCase().trim(),category:cat},mf,cf); return {id:Date.now()+i,date:t.date||todayStr(),description:t.description||"Unknown",amount:Math.abs(parseFloat(t.amount))||0,category:cat,source:"imported",checked:!reason}; });
+      const imported=parsed.map((t,i)=>({
+  id:Date.now()+i,
+  date:t.date||todayStr(),
+  description:t.description||"Unknown",
+  amount:parseFloat(t.amount)||0,  // keep negative as-is
+  category:CATEGORIES.includes(t.category)?t.category:"📦 Other",
+  source:"imported",
+  checked:!habitReason({description:(t.description||"").toLowerCase().trim(),category:CATEGORIES.includes(t.category)?t.category:"📦 Other"},mf,cf)
+}));
       // Group by month for display — multi-month statements handled correctly
       const months=[...new Set(imported.map(t=>monthKey(t.date)))].sort();
       setPendingTxs(imported);
