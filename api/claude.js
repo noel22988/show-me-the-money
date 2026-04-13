@@ -1,41 +1,32 @@
-export const config = { runtime: "edge" };
+// Serverless function — 300 second timeout (Vercel Pro)
+export const config = {
+  maxDuration: 300,
+};
 
-export default async function handler(req) {
-  // Only allow POST
-  if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { "Content-Type": "application/json" },
-    });
+export default async function handler(req, res) {
+  // Handle CORS preflight
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
   }
 
-  // CORS — lock this down to your Vercel domain in production
-  const origin = req.headers.get("origin") || "";
-  const allowedOrigins = [
-    "http://localhost:5173",
-    "http://localhost:4173",
-    // Add your Vercel domain here once deployed e.g.:
-    // "https://finance-tracker-yourname.vercel.app",
-  ];
-  const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: "API key not configured on server" });
+  }
 
   try {
-    const body = await req.json();
+    const body = req.body;
 
-    // Basic validation — don't forward garbage requests
-    if (!body.messages || !Array.isArray(body.messages)) {
-      return new Response(JSON.stringify({ error: "Invalid request" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      return new Response(JSON.stringify({ error: "API key not configured" }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
+    if (!body?.messages || !Array.isArray(body.messages)) {
+      return res.status(400).json({ error: "Invalid request body" });
     }
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -47,26 +38,21 @@ export default async function handler(req) {
       },
       body: JSON.stringify({
         model: body.model || "claude-sonnet-4-20250514",
-        max_tokens: body.max_tokens || 1000,
+        max_tokens: body.max_tokens || 4000,
         messages: body.messages,
       }),
     });
 
-    const data = await response.json();
+    if (!response.ok) {
+      const errText = await response.text();
+      return res.status(response.status).json({ error: "Anthropic API error", detail: errText });
+    }
 
-    return new Response(JSON.stringify(data), {
-      status: response.status,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": corsOrigin,
-        "Access-Control-Allow-Methods": "POST",
-        "Access-Control-Allow-Headers": "Content-Type",
-      },
-    });
+    const data = await response.json();
+    return res.status(200).json(data);
+
   } catch (err) {
-    return new Response(JSON.stringify({ error: "Server error", detail: err.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+    console.error("Claude API error:", err);
+    return res.status(500).json({ error: "Server error", detail: err.message });
   }
 }
