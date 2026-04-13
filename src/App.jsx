@@ -735,7 +735,7 @@ Rules:
 2. Debits (no CR) = positive amount
 3. Credits (with CR) = negative amount
 Return ONLY a valid JSON array, no markdown, no backticks, no explanation. Each object must have exactly: { "date":"YYYY-MM-DD", "description":"cleaned readable merchant name", "amount": number (negative if CR), "category": one of [${CATEGORIES.map(c=>JSON.stringify(c)).join(",")}] }. Output ONLY the JSON array.`;      const content=file.name.toLowerCase().endsWith(".pdf")?[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:prompt}]:`${prompt}\n\nStatement:\n${atob(base64).slice(0,8000)}`;
-      const bodyStr=JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:4000,messages:[{role:"user",content}]});
+      const bodyStr=JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:16000,messages:[{role:"user",content}]});
 console.log("Payload size:", (bodyStr.length/1024).toFixed(1), "kb");
 const res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:bodyStr});
       if(!res.ok){ const errData=await res.json().catch(()=>({})); throw new Error(errData.error||`Server error ${res.status}`); }
