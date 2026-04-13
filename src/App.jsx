@@ -706,7 +706,7 @@ Return ONLY a valid JSON array, no markdown, no backticks. Each object: { "date"
       const content=file.name.toLowerCase().endsWith(".pdf")
         ?[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:prompt}]
         :`${prompt}\n\nStatement:\n${atob(base64).slice(0,12000)}`;
-      const res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:4000,messages:[{role:"user",content}]})});
+      const res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:8000,messages:[{role:"user",content}]})});
       if(!res.ok){ const errData=await res.json().catch(()=>({})); throw new Error(errData.error||`Server error ${res.status}`); }
       const data=await res.json();
       if(data.error) throw new Error(data.error);
