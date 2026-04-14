@@ -1012,10 +1012,10 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
   // ── HOME ─────────────────────────────────────────────────────────────────────
   const HomeContent=()=>{
-    const statBox=(label,val,color,sub)=><div style={{background:T.bg,borderRadius:14,padding:"18px 20px",border:`1px solid ${T.border}`}}>
-      <div style={{fontSize:12,color:T.textMuted,marginBottom:6,letterSpacing:.5}}>{label}</div>
-      <div style={{fontSize:24,fontWeight:700,fontFamily:"'DM Mono'",color,lineHeight:1.1}}>{val}</div>
-      {sub&&<div style={{fontSize:11,color:sub.col,fontFamily:"'DM Mono'",marginTop:5}}>{sub.text}</div>}
+    const statBox=(label,val,color,sub)=><div style={{background:T.bg,borderRadius:14,padding:isDesktop?"18px 20px":"14px 16px",border:`1px solid ${T.border}`}}>
+      <div style={{fontSize:11,color:T.textMuted,marginBottom:6,letterSpacing:.5}}>{label}</div>
+      <div style={{fontSize:isDesktop?24:18,fontWeight:700,fontFamily:"'DM Mono'",color,lineHeight:1.1}}>{val}</div>
+      {sub&&<div style={{fontSize:10,color:sub.col,fontFamily:"'DM Mono'",marginTop:5}}>{sub.text}</div>}
     </div>;
     return <div style={{display:"flex",flexDirection:"column",gap:16}}>
       {/* Getting Started */}
@@ -1046,12 +1046,12 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
           <div><p style={{margin:"0 0 2px",fontSize:16,color:T.textSecondary,fontWeight:500}}>{greeting()}, {(profile.name||"there").split(" ")[0]} 👋</p><p style={{margin:0,fontSize:12,color:T.textMuted,fontFamily:"'DM Mono'"}}>{monthLabel(selectedMonth)}</p></div>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:isDesktop?"repeat(4,1fr)":"repeat(2,1fr)",gap:12,marginBottom:16}}>
-          {statBox("Income",fmt(incTotal),T.positive,null)}
-          {statBox("Fixed",fmt(fixedTotal),T.info,null)}
-          {statBox("Spent",fmt(varTotal),T.negative,avgSpend!==null?{col:varTotal<=avgSpend?T.positive:T.negative,text:`${varTotal<=avgSpend?"-":"+"}${fmt(Math.abs(varTotal-avgSpend))} vs avg`}:null)}
+        <div style={{display:"grid",gridTemplateColumns:isDesktop?"repeat(4,1fr)":"repeat(2,1fr)",gap:isDesktop?12:8,marginBottom:16}}>
+          {statBox("Income",fmt(incTotal),T.positive,prevIncTotal>0?{col:incTotal>=prevIncTotal?T.positive:T.negative,text:`${incTotal>=prevIncTotal?"+":"-"}${fmt(Math.abs(incTotal-prevIncTotal))} vs last mo`}:null)}
+          {statBox("Fixed",fmt(fixedTotal),T.info,prevFixed>0?{col:fixedTotal<=prevFixed?T.positive:T.negative,text:`${fixedTotal<=prevFixed?"-":"+"}${fmt(Math.abs(fixedTotal-prevFixed))} vs last mo`}:null)}
+          {statBox("Spent",fmt(varTotal),T.negative,prevVarTotal>0?{col:varTotal<=prevVarTotal?T.positive:T.negative,text:`${varTotal<=prevVarTotal?"-":"+"}${fmt(Math.abs(varTotal-prevVarTotal))} vs last mo`}:null)}
           {incTotal===0
-            ?<div style={{background:T.bg,borderRadius:14,padding:"18px 20px",border:`1px solid ${T.border}`,display:"flex",alignItems:"center"}}><span style={{fontSize:13,color:T.textMuted,cursor:"pointer"}} onClick={()=>setTab("profile")}>Set up income →</span></div>
+            ?<div style={{background:T.bg,borderRadius:14,padding:isDesktop?"18px 20px":"14px 16px",border:`1px solid ${T.border}`,display:"flex",alignItems:"center"}}><span style={{fontSize:12,color:T.textMuted,cursor:"pointer"}} onClick={()=>setTab("profile")}>Set up income →</span></div>
             :statBox("Saved",fmt(saved),saved>=0?T.positive:T.negative,prevSaved!==0?{col:saved>=prevSaved?T.positive:T.negative,text:`${saved>=prevSaved?"+":"-"}${fmt(Math.abs(saved-prevSaved))} vs last mo`}:null)}
         </div>
         {incTotal>0&&<>
@@ -1062,44 +1062,6 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       </Card>
       {/* Chart */}
       <Card><SLabel>6-Month Overview</SLabel><SixMonthChart monthlyData={monthlyData} incomeStreams={streams} selectedMonth={selectedMonth} startMonth={profile.startMonth}/></Card>
-      {/* Previous months */}
-      {(()=>{
-        const prevMonths=[]; let m=prevMonth(selectedMonth);
-        for(let i=0;i<3;i++){
-          if(profile.startMonth&&m<profile.startMonth) break;
-          prevMonths.push(m); m=prevMonth(m);
-        }
-        if(!prevMonths.length) return null;
-        return <Card>
-          <SLabel>Previous Months</SLabel>
-          {prevMonths.map(mo=>{
-            const mmd=monthlyData[mo]||{};
-            const mTxs=mmd.txs||[];
-            const mInc=totalIncome(streams,mmd.incomeOverrides||{},mo);
-            const mSpent=mTxs.reduce((s,t)=>s+t.amount,0);
-            const mFixed=(mmd.fixedOverrides||profile.fixedCommitments||[]).filter(c=>(!c.startFrom||mo>=c.startFrom)&&(!c.endMonth||mo<=c.endMonth)).reduce((s,c)=>s+(+c.amount||0),0);
-            const mSaved=mInc-mSpent-mFixed;
-            const mRate=mInc>0?(mSaved/mInc*100):null;
-            const hasData=mTxs.length>0||mInc>0;
-            return <div key={mo} onClick={()=>setSelectedMonth(mo)}
-              style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:`1px solid ${T.border}`,cursor:"pointer"}}>
-              <div style={{flex:1}}>
-                <div style={{fontSize:14,fontWeight:500,color:T.textPrimary}}>{monthLabel(mo)}</div>
-                {hasData
-                  ?<div style={{fontSize:12,color:T.textMuted,marginTop:2,fontFamily:"'DM Mono'"}}>
-                    {mInc>0?`${fmt(mInc)} in · `:"no income · "}{fmt(mSpent)} spent
-                  </div>
-                  :<div style={{fontSize:12,color:T.textMuted,marginTop:2}}>No data</div>}
-              </div>
-              {hasData&&<div style={{textAlign:"right",flexShrink:0}}>
-                <div style={{fontSize:14,fontWeight:600,fontFamily:"'DM Mono'",color:mSaved>=0?T.positive:T.negative}}>{fmt(mSaved)}</div>
-                {mRate!==null&&<div style={{fontSize:11,color:mRate>=20?T.positive:mRate>=10?T.warning:T.negative,fontFamily:"'DM Mono'",marginTop:2}}>{mRate.toFixed(1)}%</div>}
-              </div>}
-              <span style={{fontSize:14,color:T.textMuted,opacity:.4}}>›</span>
-            </div>;
-          })}
-        </Card>;
-      })()}
       {/* Insights */}
       <Card>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:insights.text?14:0}}>
