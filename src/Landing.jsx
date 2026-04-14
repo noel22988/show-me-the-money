@@ -68,6 +68,7 @@ export default function Landing({ onEnter }) {
           .enter-btn:hover{transform:translateY(-2px);box-shadow:0 8px 32px rgba(200,255,87,0.35);}
           .feature-card:hover{border-color:rgba(200,255,87,0.3);transform:translateY(-2px);}
           .faq-item:hover{background:rgba(255,255,255,0.05);}
+          @media(min-width:600px){.mock-grid{grid-template-columns:repeat(4,1fr)!important;}}
         `}</style>
 
         {/* Nav */}
@@ -106,7 +107,7 @@ export default function Landing({ onEnter }) {
 
         {/* Mock UI strip */}
         <div className="fade-up d5" style={{maxWidth:720,margin:"0 auto 96px",padding:"0 32px"}}>
-          <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:20,padding:"24px",display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
+          <div className="mock-grid" style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:20,padding:"24px",display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
             {[["Income","S$6,200","#51CF66"],["Fixed","S$1,800","#60AAFF"],["Spent","S$2,100","#FF6B6B"],["Saved","S$2,300","#C8FF57"]].map(([label,val,col])=>(
               <div key={label} style={{background:"rgba(255,255,255,0.04)",borderRadius:12,padding:"16px 14px",border:"1px solid rgba(255,255,255,0.06)"}}>
                 <div style={{fontSize:10,color:"#555568",letterSpacing:1,marginBottom:6,textTransform:"uppercase"}}>{label}</div>
