@@ -1,6 +1,11 @@
 // Serverless function — 300 second timeout (Vercel Pro)
 export const config = {
   maxDuration: 300,
+  api: {
+    bodyParser: {
+      sizeLimit: '20mb',
+    },
+  },
 };
 
 export default async function handler(req, res) {
