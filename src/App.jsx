@@ -636,7 +636,7 @@ function Onboarding({onComplete}){
     const reader=new FileReader();
     reader.onload=ev=>setCropSrc(ev.target.result);
     reader.readAsDataURL(f);
-  ;
+  };
   const finish=()=>onComplete({...DEFAULT_PROFILE,...p,incomeStreams:(p.incomeStreams||[]).map(s=>({...s,defaultAmount:parseFloat(s.defaultAmount)||0})),fixedCommitments:(p.fixedCommitments||[]).map(c=>({...c,amount:parseFloat(c.amount)||0,startFrom:c.startFrom||"",endMonth:c.endMonth||""})),onboarded:true});
   const updStream=(id,field,val)=>setP(v=>({...v,incomeStreams:v.incomeStreams.map(x=>x.id===id?{...x,[field]:val}:x)}));
   const steps=[
@@ -1046,10 +1046,13 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
           <div><p style={{margin:"0 0 2px",fontSize:16,color:T.textSecondary,fontWeight:500}}>{greeting()}, {(profile.name||"there").split(" ")[0]} 👋</p><p style={{margin:0,fontSize:12,color:T.textMuted,fontFamily:"'DM Mono'"}}>{monthLabel(selectedMonth)}</p></div>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:16}}>
-          {statBox("Spent",fmt(varTotal),T.negative,avgSpend!==null?{col:varTotal<=avgSpend?T.positive:T.negative,text:`${varTotal<=avgSpend?"-":"+"}${fmt(Math.abs(varTotal-avgSpend))} vs avg`}:null)}
+        <div style={{display:"grid",gridTemplateColumns:isDesktop?"repeat(4,1fr)":"repeat(2,1fr)",gap:12,marginBottom:16}}>
+          {statBox("Income",fmt(incTotal),T.positive,null)}
           {statBox("Fixed",fmt(fixedTotal),T.info,null)}
-          {incTotal===0?<div style={{background:T.bg,borderRadius:14,padding:"18px 20px",border:`1px solid ${T.border}`,display:"flex",alignItems:"center"}}><span style={{fontSize:13,color:T.textMuted,cursor:"pointer"}} onClick={()=>setTab("profile")}>Set up income streams →</span></div>:statBox("Saved",fmt(saved),saved>=0?T.positive:T.negative,prevSaved!==0?{col:saved>=prevSaved?T.positive:T.negative,text:`${saved>=prevSaved?"+":"-"}${fmt(Math.abs(saved-prevSaved))} vs last mo`}:null)}
+          {statBox("Spent",fmt(varTotal),T.negative,avgSpend!==null?{col:varTotal<=avgSpend?T.positive:T.negative,text:`${varTotal<=avgSpend?"-":"+"}${fmt(Math.abs(varTotal-avgSpend))} vs avg`}:null)}
+          {incTotal===0
+            ?<div style={{background:T.bg,borderRadius:14,padding:"18px 20px",border:`1px solid ${T.border}`,display:"flex",alignItems:"center"}}><span style={{fontSize:13,color:T.textMuted,cursor:"pointer"}} onClick={()=>setTab("profile")}>Set up income →</span></div>
+            :statBox("Saved",fmt(saved),saved>=0?T.positive:T.negative,prevSaved!==0?{col:saved>=prevSaved?T.positive:T.negative,text:`${saved>=prevSaved?"+":"-"}${fmt(Math.abs(saved-prevSaved))} vs last mo`}:null)}
         </div>
         {incTotal>0&&<>
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:13,color:T.textMuted}}>Savings rate</span><span style={{fontSize:14,fontFamily:"'DM Mono'",color:savingsRate>=20?T.positive:savingsRate>=10?T.warning:T.negative,fontWeight:700}}>{savingsRate.toFixed(1)}%</span></div>
@@ -1059,6 +1062,44 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       </Card>
       {/* Chart */}
       <Card><SLabel>6-Month Overview</SLabel><SixMonthChart monthlyData={monthlyData} incomeStreams={streams} selectedMonth={selectedMonth} startMonth={profile.startMonth}/></Card>
+      {/* Previous months */}
+      {(()=>{
+        const prevMonths=[]; let m=prevMonth(selectedMonth);
+        for(let i=0;i<3;i++){
+          if(profile.startMonth&&m<profile.startMonth) break;
+          prevMonths.push(m); m=prevMonth(m);
+        }
+        if(!prevMonths.length) return null;
+        return <Card>
+          <SLabel>Previous Months</SLabel>
+          {prevMonths.map(mo=>{
+            const mmd=monthlyData[mo]||{};
+            const mTxs=mmd.txs||[];
+            const mInc=totalIncome(streams,mmd.incomeOverrides||{},mo);
+            const mSpent=mTxs.reduce((s,t)=>s+t.amount,0);
+            const mFixed=(mmd.fixedOverrides||profile.fixedCommitments||[]).filter(c=>(!c.startFrom||mo>=c.startFrom)&&(!c.endMonth||mo<=c.endMonth)).reduce((s,c)=>s+(+c.amount||0),0);
+            const mSaved=mInc-mSpent-mFixed;
+            const mRate=mInc>0?(mSaved/mInc*100):null;
+            const hasData=mTxs.length>0||mInc>0;
+            return <div key={mo} onClick={()=>setSelectedMonth(mo)}
+              style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:`1px solid ${T.border}`,cursor:"pointer"}}>
+              <div style={{flex:1}}>
+                <div style={{fontSize:14,fontWeight:500,color:T.textPrimary}}>{monthLabel(mo)}</div>
+                {hasData
+                  ?<div style={{fontSize:12,color:T.textMuted,marginTop:2,fontFamily:"'DM Mono'"}}>
+                    {mInc>0?`${fmt(mInc)} in · `:"no income · "}{fmt(mSpent)} spent
+                  </div>
+                  :<div style={{fontSize:12,color:T.textMuted,marginTop:2}}>No data</div>}
+              </div>
+              {hasData&&<div style={{textAlign:"right",flexShrink:0}}>
+                <div style={{fontSize:14,fontWeight:600,fontFamily:"'DM Mono'",color:mSaved>=0?T.positive:T.negative}}>{fmt(mSaved)}</div>
+                {mRate!==null&&<div style={{fontSize:11,color:mRate>=20?T.positive:mRate>=10?T.warning:T.negative,fontFamily:"'DM Mono'",marginTop:2}}>{mRate.toFixed(1)}%</div>}
+              </div>}
+              <span style={{fontSize:14,color:T.textMuted,opacity:.4}}>›</span>
+            </div>;
+          })}
+        </Card>;
+      })()}
       {/* Insights */}
       <Card>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:insights.text?14:0}}>
@@ -1324,7 +1365,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
     return <div style={{display:"flex",flexDirection:"column",gap:16,paddingBottom:40}}>
       {cropSrc&&<AvatarCropModal src={cropSrc} onSave={data=>{setP(v=>({...v,avatar:data}));setCropSrc(null);}} onClose={()=>setCropSrc(null)}/>}
-      {restCand&&<RestoreModal backup={restCand} onConfirm={()=>doRest(restCand)} onClose={()=>setRestCand(null)}/>}}
+      {restCand&&<RestoreModal backup={restCand} onConfirm={()=>doRest(restCand)} onClose={()=>setRestCand(null)}/>}
       {showRst&&<ResetModal onConfirm={doReset} onClose={()=>setShowRst(false)} onDownloadFirst={()=>{dlBackup(profile,monthlyData,eh,ch,insights,archive);showToast("Backup downloaded");}}/>}
       <input ref={restRef} type="file" accept=".json" style={{display:"none"}} onChange={handleRestFile}/>
 
