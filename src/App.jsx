@@ -17,7 +17,7 @@ const LIGHT_PRESETS = [{name:"Slate",accent:"#5C5FEF",bg:"#F0F2F5"},{name:"Sage"
 const todayStr = () => new Date().toISOString().split("T")[0];
 const monthKey = d => d.slice(0,7);
 const currentMonth = () => monthKey(todayStr());
-const monthLabel = m => { try { const [y,mo]=m.split("-"); return new Date(+y,+mo-1,1).toLocaleDateString("en-SG",{month:"long",year:"numeric"}); } catch { return m; }};
+const monthLabel = m => { try { const [y,mo]=m.split("-"); return new Date(+y,+mo-1,1).toLocaleDateString("en-SG",{month:"short",year:"numeric"}); } catch { return m; }};
 const monthLabelShort = m => { try { const [y,mo]=m.split("-"); return new Date(+y,+mo-1,1).toLocaleDateString("en-SG",{month:"short",year:"2-digit"}); } catch { return m; }};
 const prevMonth = m => { const [y,mo]=m.split("-"); const d=new Date(+y,+mo-2,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; };
 const greeting = () => { const h=new Date().getHours(); return h<12?"Good morning":h<17?"Good afternoon":"Good evening"; };
