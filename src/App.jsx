@@ -1292,24 +1292,6 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       <button onClick={()=>setShowRst(true)} style={{padding:"13px",background:"transparent",border:`1px solid ${T.negative}40`,borderRadius:12,fontFamily:"inherit",fontSize:14,color:T.negative,cursor:"pointer",width:"100%",marginBottom:8}}>Reset Everything & Start Again</button>
     </div>;
   };
-// ╔══════════════════════════════════════════════════════════════╗
-// ║  PART 2B — Layout wrapper + renderContent + return          ║
-// ║  Paste this AFTER ProfileContent, still inside App()        ║
-// ╚══════════════════════════════════════════════════════════════╝
-
-  // ── Nav item ────────────────────────────────────────────────────────────────
-  const navItem=([id,icon,label])=>{
-    const active=tab===id;
-    if(isDesktop) return <button key={id} onClick={()=>setTab(id)} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 16px",borderRadius:12,background:active?T.accentMuted:"transparent",border:"none",color:active?T.accent:T.textSecondary,fontFamily:"inherit",fontSize:15,fontWeight:active?600:400,cursor:"pointer",width:"100%",textAlign:"left",transition:"all .15s",marginBottom:2}}>
-      <span style={{fontSize:18,width:24,textAlign:"center"}}>{icon}</span>{label}
-      {id==="review"&&pendingTxs.length>0&&<span style={{marginLeft:"auto",background:T.accent,color:T.accentText,borderRadius:20,fontSize:10,fontWeight:700,padding:"2px 8px"}}>{pendingTxs.length}</span>}
-    </button>;
-    return <button key={id} onClick={()=>setTab(id)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"9px 4px",background:"none",border:"none",borderTop:`2.5px solid ${active?T.accent:"transparent"}`,color:active?T.accent:T.textMuted,fontFamily:"inherit",fontSize:9,fontWeight:active?600:400,cursor:"pointer",position:"relative",transition:"color .15s"}}>
-      <span style={{fontSize:20}}>{icon}</span>{label}
-      {id==="review"&&pendingTxs.length>0&&<span style={{position:"absolute",top:5,right:"50%",transform:"translateX(130%)",background:T.accent,color:T.accentText,borderRadius:20,fontSize:9,fontWeight:700,padding:"1px 5px"}}>{pendingTxs.length}</span>}
-    </button>;
-  };
-
   // ── renderContent ────────────────────────────────────────────────────────────
   const renderContent=()=>{
     const wrap=children=><div style={{maxWidth:isDesktop?760:580,margin:"0 auto",padding:isDesktop?"32px 40px":"16px 16px 16px"}}>{children}</div>;
