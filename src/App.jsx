@@ -637,7 +637,6 @@ function Onboarding({onComplete}){
               <div><div style={{fontSize:11,color:T.textMuted,marginBottom:4}}>Ends (optional)</div><input type="month" value={s.endMonth||""} onChange={e=>updStream(s.id,"endMonth",e.target.value)} style={inp}/></div>
             </div>
           </>}
-          {s.type==="variable"&&<div><div style={{fontSize:11,color:T.textMuted,marginBottom:4}}
           {s.type==="oneoff"&&<div><div style={{fontSize:11,color:T.textMuted,marginBottom:4}}>For which month?</div><input type="month" value={s.startFrom||""} onChange={e=>updStream(s.id,"startFrom",e.target.value)} style={inp}/></div>}
         </div>)}
       </div>
@@ -1287,12 +1286,12 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
               </button>)}
             </div>
             {s.type==="fixed"&&<input type="number" placeholder="Monthly amount" value={s.defaultAmount||""} onChange={e=>updS(s.id,"defaultAmount",parseFloat(e.target.value)||0)} style={{...inp2,marginBottom:10}}/>}
-            <div>
+            {s.type!=="variable"&&<div>
               <div style={{fontSize:11,color:T.textMuted,marginBottom:5}}>
                 {s.type==="oneoff"?"For which month (one-off income)?":"Active from (leave blank = app start month)"}
               </div>
               <input type="month" value={s.startFrom||""} onChange={e=>updS(s.id,"startFrom",e.target.value)} style={inp2}/>
-            </div>
+            </div>}
           </div>}
         />
         {!(p.incomeStreams||[]).length&&<p style={{fontSize:14,color:T.textMuted,margin:0}}>No income streams yet</p>}
