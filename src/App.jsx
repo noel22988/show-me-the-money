@@ -17,7 +17,7 @@ const LIGHT_PRESETS = [{name:"Slate",accent:"#5C5FEF",bg:"#F0F2F5"},{name:"Sage"
 const todayStr = () => new Date().toISOString().split("T")[0];
 const monthKey = d => d.slice(0,7);
 const currentMonth = () => monthKey(todayStr());
-const monthLabel = m => { try { const [y,mo]=m.split("-"); return new Date(+y,+mo-1,1).toLocaleDateString("en-SG",{month:"short",year:"numeric"}); } catch { return m; }};
+const monthLabel = m => { try { const [y,mo]=m.split("-"); return new Date(+y,+mo-1,1).toLocaleDateString("en-SG",{month:"long",year:"numeric"}); } catch { return m; }};
 const monthLabelShort = m => { try { const [y,mo]=m.split("-"); return new Date(+y,+mo-1,1).toLocaleDateString("en-SG",{month:"short",year:"2-digit"}); } catch { return m; }};
 const prevMonth = m => { const [y,mo]=m.split("-"); const d=new Date(+y,+mo-2,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; };
 const greeting = () => { const h=new Date().getHours(); return h<12?"Good morning":h<17?"Good afternoon":"Good evening"; };
@@ -204,6 +204,45 @@ function ThemePresets({accentColor,bgColor,onChange}){
 }
 
 // ── DragList ──────────────────────────────────────────────────────────────────
+// ── MonthSelect — compact MMM YYYY picker for fixed commitment dates ──────────
+function MonthSelect({value,onChange,placeholder="Any"}){
+  const T=useTheme();
+  const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const parsed=value&&/^\d{4}-\d{2}$/.test(value)?{y:parseInt(value.split("-")[0]),m:parseInt(value.split("-")[1])-1}:null;
+  const [open,setOpen]=useState(false);
+  const [selYear,setSelYear]=useState(parsed?.y||new Date().getFullYear());
+  const btnRef=useRef(); const [pos,setPos]=useState({top:0,left:0});
+  useEffect(()=>{
+    if(open&&btnRef.current){
+      const r=btnRef.current.getBoundingClientRect();
+      setPos({top:r.bottom+4,left:r.left});
+    }
+  },[open]);
+  const select=(y,m)=>{ onChange(`${y}-${String(m+1).padStart(2,"0")}`); setOpen(false); };
+  const clear=e=>{ e.stopPropagation(); onChange(""); setOpen(false); };
+  const label=parsed?`${MONTHS[parsed.m]} ${parsed.y}`:placeholder;
+  return <div style={{position:"relative",display:"inline-block",width:"100%"}}>
+    <button ref={btnRef} onClick={()=>setOpen(o=>!o)} style={{width:"100%",padding:"9px 10px",background:T.surface2,border:`1px solid ${T.borderMid}`,borderRadius:10,color:parsed?T.textPrimary:T.textMuted,fontFamily:"inherit",fontSize:13,cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <span>{label}</span>
+      <span style={{display:"flex",gap:4,alignItems:"center"}}>
+        {parsed&&<span onClick={clear} style={{fontSize:14,color:T.textMuted,lineHeight:1,padding:"0 2px"}}>×</span>}
+        <span style={{fontSize:10,color:T.textMuted}}>▾</span>
+      </span>
+    </button>
+    {open&&<><div style={{position:"fixed",inset:0,zIndex:399}} onClick={()=>setOpen(false)}/>
+      <div style={{position:"fixed",top:pos.top,left:pos.left,background:T.surface,border:`1px solid ${T.borderMid}`,borderRadius:12,zIndex:400,boxShadow:"0 8px 32px rgba(0,0,0,0.3)",padding:"10px",minWidth:220}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+          <button onClick={()=>setSelYear(y=>y-1)} style={{background:"none",border:"none",color:T.textSecondary,cursor:"pointer",fontSize:16,padding:"2px 8px"}}>‹</button>
+          <span style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>{selYear}</span>
+          <button onClick={()=>setSelYear(y=>y+1)} style={{background:"none",border:"none",color:T.textSecondary,cursor:"pointer",fontSize:16,padding:"2px 8px"}}>›</button>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:4}}>
+          {MONTHS.map((mo,i)=>{ const isSelected=parsed&&parsed.y===selYear&&parsed.m===i; return <button key={mo} onClick={()=>select(selYear,i)} style={{padding:"6px 2px",background:isSelected?T.accent:"transparent",border:`1px solid ${isSelected?T.accent:T.border}`,borderRadius:7,color:isSelected?T.accentText:T.textSecondary,fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:isSelected?700:400}}>{mo}</button>; })}
+        </div>
+      </div></>}
+  </div>;
+}
+
 function DragList({items,onReorder,renderItem}){
   const T=useTheme(); const [di,setDi]=useState(null); const [oi,setOi]=useState(null);
   return <div>{(items||[]).map((item,i)=><div key={item.id||i} draggable onDragStart={()=>setDi(i)} onDragOver={e=>{e.preventDefault();setOi(i);}} onDrop={e=>{e.preventDefault();if(di===null||di===i)return;const a=[...items];const[it]=a.splice(di,1);a.splice(i,0,it);onReorder(a);setDi(null);setOi(null);}} onDragEnd={()=>{setDi(null);setOi(null);}} style={{opacity:di===i?0.4:1,borderTop:oi===i&&di!==i?`2px solid ${T.accent}`:"2px solid transparent"}}>{renderItem(item,i)}</div>)}</div>;
@@ -704,14 +743,14 @@ function Onboarding({onComplete}){
       <p style={{margin:"0 0 14px",fontSize:14,color:T.textSecondary,lineHeight:1.6}}>Insurance, rent, loans — things that go out every month. Leave dates blank to apply from the start with no end date.</p>
       <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:14}}>
         {(p.fixedCommitments||[]).map(c=><div key={c.id} style={{background:T.surface2,borderRadius:12,padding:"12px",border:`1px solid ${T.border}`}}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:8,marginBottom:8,alignItems:"center"}}>
+          <div style={{display:"grid",gridTemplateColumns:"2fr 80px auto",gap:8,marginBottom:8,alignItems:"center"}}>
             <input placeholder="Name (e.g. Insurance)" value={c.name} onChange={e=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.map(x=>x.id===c.id?{...x,name:e.target.value}:x)}))} style={inp}/>
-            <input type="number" placeholder="Amount" value={c.amount||""} onChange={e=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.map(x=>x.id===c.id?{...x,amount:e.target.value}:x)}))} style={{...inp,width:100}}/>
+            <input type="number" placeholder="Amt" value={c.amount||""} onChange={e=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.map(x=>x.id===c.id?{...x,amount:e.target.value}:x)}))} style={{...inp,textAlign:"right"}}/>
             <button onClick={()=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.filter(x=>x.id!==c.id)}))} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:20,padding:"0 6px"}}>×</button>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            <div><div style={{fontSize:11,color:T.textMuted,marginBottom:3}}>Start from (blank = always)</div><input type="month" value={c.startFrom||""} onChange={e=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.map(x=>x.id===c.id?{...x,startFrom:e.target.value}:x)}))} style={inp}/></div>
-            <div><div style={{fontSize:11,color:T.textMuted,marginBottom:3}}>End month (blank = ongoing)</div><input type="month" value={c.endMonth||""} onChange={e=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.map(x=>x.id===c.id?{...x,endMonth:e.target.value}:x)}))} style={inp}/></div>
+            <div><div style={{fontSize:11,color:T.textMuted,marginBottom:3}}>Start from</div><MonthSelect value={c.startFrom||""} onChange={v=>setP(x=>({...x,fixedCommitments:x.fixedCommitments.map(f=>f.id===c.id?{...f,startFrom:v}:f)}))}/></div>
+            <div><div style={{fontSize:11,color:T.textMuted,marginBottom:3}}>End month</div><MonthSelect value={c.endMonth||""} onChange={v=>setP(x=>({...x,fixedCommitments:x.fixedCommitments.map(f=>f.id===c.id?{...f,endMonth:v}:f)}))}/></div>
           </div>
         </div>)}
       </div>
@@ -1400,20 +1439,20 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           items={p.fixedCommitments||[]}
           onReorder={list=>setP(prev=>({...prev,fixedCommitments:list}))}
           renderItem={c=><div style={{background:T.surface2,borderRadius:12,padding:"14px",border:`1px solid ${T.border}`,marginBottom:10}}>
-            <div style={{display:"grid",gridTemplateColumns:"auto 1fr auto auto",gap:10,marginBottom:12,alignItems:"center"}}>
+            <div style={{display:"grid",gridTemplateColumns:"auto 2fr 80px auto",gap:10,marginBottom:12,alignItems:"center"}}>
               <span style={{color:T.textMuted,cursor:"grab",fontSize:16,userSelect:"none",padding:"0 2px"}}>⠿</span>
               <input type="text" placeholder="Name (e.g. Insurance)" value={c.name} onChange={e=>updF(c.id,"name",e.target.value)} style={inp2}/>
-              <input type="number" placeholder="0" value={c.amount||""} onChange={e=>updF(c.id,"amount",parseFloat(e.target.value)||0)} style={{...inp2,width:110,textAlign:"right"}}/>
+              <input type="number" placeholder="0" value={c.amount||""} onChange={e=>updF(c.id,"amount",parseFloat(e.target.value)||0)} style={{...inp2,textAlign:"right"}}/>
               <button onClick={()=>rmF(c.id)} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:20,padding:"0 6px",lineHeight:1}}>×</button>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               <div>
                 <div style={{fontSize:11,color:T.textMuted,marginBottom:5}}>Start from</div>
-                <input type="month" value={c.startFrom||""} onChange={e=>updF(c.id,"startFrom",e.target.value)} style={inp2}/>
+                <MonthSelect value={c.startFrom||""} onChange={v=>updF(c.id,"startFrom",v)}/>
               </div>
               <div>
-                <div style={{fontSize:11,color:T.textMuted,marginBottom:5}}>End month (optional)</div>
-                <input type="month" value={c.endMonth||""} onChange={e=>updF(c.id,"endMonth",e.target.value)} style={inp2}/>
+                <div style={{fontSize:11,color:T.textMuted,marginBottom:5}}>End month</div>
+                <MonthSelect value={c.endMonth||""} onChange={v=>updF(c.id,"endMonth",v)}/>
               </div>
             </div>
           </div>}
