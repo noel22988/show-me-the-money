@@ -929,7 +929,6 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
             <div style={{fontSize:12,color:T.textMuted,fontFamily:"'DM Mono'"}}>{mTxs.filter(t=>t.checked).length}/{mTxs.length}</div>
           </div>}
           {normal.map(t=>renderRow(t))}
-          {false&&<><div/>}
           {flagged.length>0&&<><div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8,marginTop:10}}><span style={{fontSize:11,color:T.textMuted,fontFamily:"'DM Mono'",whiteSpace:"nowrap",letterSpacing:.5}}>USUALLY EXCLUDED ({flagged.length})</span><div style={{flex:1,height:"1px",background:T.border}}/></div>{flagged.map(t=>renderRow(t,true))}</>}
         </div>; })}
     </div>;
