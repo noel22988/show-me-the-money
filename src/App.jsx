@@ -6,7 +6,7 @@ const FIXED_CATS = ["🏠 Rent/Mortgage","💳 Insurance","🏦 Loan Repayment",
 const CAT_COLORS = {"🍔 Food & Dining":"#FF6B6B","🛒 Groceries":"#51CF66","🚗 Transport":"#339AF0","🎬 Entertainment":"#CC5DE8","🏥 Health":"#FF922B","👕 Shopping":"#F06595","💡 Utilities":"#FAB005","✈️ Travel":"#20C997","📦 Other":"#868E96","🏠 Rent/Mortgage":"#60AAFF","💳 Insurance":"#FF6B6B","🏦 Loan Repayment":"#FAB005","📱 Subscription":"#CC5DE8","🔒 Investment":"#51CF66","💰 Savings Transfer":"#20C997"};
 const CURRENCIES = ["SGD","USD","MYR","AUD","GBP","EUR","JPY","HKD","THB","IDR"];
 const CURRENCY_SYMBOLS = {"SGD":"S$","USD":"$","MYR":"RM","AUD":"A$","GBP":"£","EUR":"€","JPY":"¥","HKD":"HK$","THB":"฿","IDR":"Rp"};
-const HABIT_THRESHOLD = 3;
+const HABIT_THRESHOLD = 2;
 const MAX_AUTO_BACKUPS = 7;
 const APP_VERSION = "3.1";
 const SIDEBAR_W = 260;
@@ -261,6 +261,54 @@ function SixMonthChart({monthlyData,incomeStreams,selectedMonth,startMonth,compa
 }
 
 // ── InsightCards ──────────────────────────────────────────────────────────────
+// ── CompactTxRow — simple editable row matching archive style ─────────────────
+function CompactTxRow({tx,onArchive,onEdit,fmt,customCategories}){
+  const T=useTheme(); const inp=useInp();
+  const CATS=getAllCats(customCategories); const COLS=getAllCatCols(customCategories);
+  const [editing,setEditing]=useState(false); const [draft,setDraft]=useState(tx);
+  useEffect(()=>setDraft(tx),[tx.id]);
+  const isCredit=tx.amount<0;
+  if(editing) return <div style={{background:T.surface,borderRadius:12,padding:"12px",border:`1px solid ${T.accent}60`,marginBottom:2}}>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+      <input value={draft.description} onChange={e=>setDraft(d=>({...d,description:e.target.value}))} style={{...inp,gridColumn:"1/-1",padding:"8px 12px",fontSize:13}} placeholder="Description"/>
+      <input type="number" value={Math.abs(draft.amount)} onChange={e=>setDraft(d=>({...d,amount:isCredit?-(parseFloat(e.target.value)||0):(parseFloat(e.target.value)||0)}))} style={{...inp,padding:"8px 12px",fontSize:13}} placeholder="Amount"/>
+      <input type="date" value={draft.date} onChange={e=>setDraft(d=>({...d,date:e.target.value}))} style={{...inp,padding:"8px 12px",fontSize:13}}/>
+      <select value={draft.category} onChange={e=>setDraft(d=>({...d,category:e.target.value}))} style={{...inp,gridColumn:"1/-1",padding:"8px 12px",fontSize:13}}>{CATS.map(c=><option key={c}>{c}</option>)}</select>
+    </div>
+    <div style={{display:"flex",gap:8}}><Btn onClick={()=>{onEdit(draft);setEditing(false);}} style={{padding:"8px",fontSize:12}}>Save</Btn><Btn variant="ghost" onClick={()=>setEditing(false)} style={{padding:"8px",fontSize:12,flex:1}}>Cancel</Btn></div>
+  </div>;
+  return <div style={{display:"flex",alignItems:"center",gap:10,background:T.surface,borderRadius:12,padding:"10px 14px",border:`1px solid ${isCredit?T.positive+"40":T.border}`}}>
+    <span style={{fontSize:16,flexShrink:0}}>{tx.category?.split(" ")[0]}</span>
+    <div style={{flex:1,minWidth:0}}>
+      <div style={{fontSize:13,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:T.textPrimary}}>{tx.description}{isCredit&&<span style={{marginLeft:6,fontSize:10,color:T.positive,fontFamily:"'DM Mono'",border:`1px solid ${T.positive}40`,borderRadius:4,padding:"1px 5px"}}>CR</span>}</div>
+      <div style={{fontSize:11,color:T.textMuted,fontFamily:"'DM Mono'",marginTop:1}}>{tx.date}</div>
+    </div>
+    <div style={{fontFamily:"'DM Mono'",fontSize:13,fontWeight:600,color:isCredit?T.positive:T.textPrimary,flexShrink:0}}>{isCredit?"-":""}{fmt(Math.abs(tx.amount))}</div>
+    {onEdit&&<button onClick={()=>setEditing(true)} style={{background:"none",border:`1px solid ${T.borderMid}`,borderRadius:7,color:T.textSecondary,cursor:"pointer",fontSize:12,padding:"3px 8px",flexShrink:0}}>✎</button>}
+    {onArchive&&<button onClick={()=>onArchive(tx.id)} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:18,padding:"0 2px",flexShrink:0,lineHeight:1}}>×</button>}
+  </div>;
+}
+
+function ManualAddForm({onAdd,categories,defaultDate}){
+  const T=useTheme(); const inp=useInp();
+  const [desc,setDesc]=useState("");
+  const [amount,setAmount]=useState("");
+  const [cat,setCat]=useState(categories[0]||"📦 Other");
+  const [date,setDate]=useState(defaultDate||todayStr());
+  const submit=()=>{
+    if(!desc.trim()||!amount||isNaN(+amount)||+amount<=0) return;
+    onAdd({description:desc.trim(),amount:parseFloat(amount),category:cat,date});
+    setDesc(""); setAmount("");
+  };
+  return <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+    <input type="text" placeholder="Description" value={desc} onChange={e=>setDesc(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()} style={inp}/>
+    <input type="number" placeholder="Amount" value={amount} onChange={e=>setAmount(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()} style={inp}/>
+    <select value={cat} onChange={e=>setCat(e.target.value)} style={{...inp,gridColumn:"1/-1"}}>{categories.map(c=><option key={c}>{c}</option>)}</select>
+    <input type="date" value={date} onChange={e=>setDate(e.target.value)} style={inp}/>
+    <Btn onClick={submit} style={{padding:"11px",fontSize:14}}>+ Add</Btn>
+  </div>;
+}
+
 function InsightCards({text}){
   const T=useTheme(); if(!text) return null;
   const items=text.split(/\n+/).filter(l=>l.trim()).map(l=>l.replace(/^\d+[\.\)]\s*/,"").replace(/^[-•]\s*/,"").trim()).filter(Boolean);
@@ -589,7 +637,7 @@ function Onboarding({onComplete}){
     reader.onload=ev=>setCropSrc(ev.target.result);
     reader.readAsDataURL(f);
   };
-  const finish=()=>onComplete({...DEFAULT_PROFILE,...p,incomeStreams:(p.incomeStreams||[]).map(s=>({...s,defaultAmount:parseFloat(s.defaultAmount)||0})),fixedCommitments:[],onboarded:true});
+  const finish=()=>onComplete({...DEFAULT_PROFILE,...p,incomeStreams:(p.incomeStreams||[]).map(s=>({...s,defaultAmount:parseFloat(s.defaultAmount)||0})),fixedCommitments:(p.fixedCommitments||[]).map(c=>({...c,amount:parseFloat(c.amount)||0,startFrom:c.startFrom||"",endMonth:c.endMonth||""})),onboarded:true});
   const updStream=(id,field,val)=>setP(v=>({...v,incomeStreams:v.incomeStreams.map(x=>x.id===id?{...x,[field]:val}:x)}));
   const steps=[
     // Step 0 — identity
@@ -653,15 +701,21 @@ function Onboarding({onComplete}){
     // Step 3 — fixed commitments
     <div key="s3">
       <p style={{margin:"0 0 6px",fontSize:22,fontWeight:700,color:T.textPrimary}}>Fixed commitments</p>
-      <p style={{margin:"0 0 14px",fontSize:14,color:T.textSecondary,lineHeight:1.6}}>Insurance, rent, loans — things that go out every month.</p>
+      <p style={{margin:"0 0 14px",fontSize:14,color:T.textSecondary,lineHeight:1.6}}>Insurance, rent, loans — things that go out every month. Leave dates blank to apply from the start with no end date.</p>
       <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:14}}>
-        {(p.fixedCommitments||[]).map(c=><div key={c.id} style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:10,alignItems:"center"}}>
-          <input placeholder="Name" value={c.name} onChange={e=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.map(x=>x.id===c.id?{...x,name:e.target.value}:x)}))} style={inp}/>
-          <input type="number" placeholder="0" value={c.amount} onChange={e=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.map(x=>x.id===c.id?{...x,amount:e.target.value}:x)}))} style={{...inp,width:100}}/>
-          <button onClick={()=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.filter(x=>x.id!==c.id)}))} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:20,padding:"0 6px"}}>×</button>
+        {(p.fixedCommitments||[]).map(c=><div key={c.id} style={{background:T.surface2,borderRadius:12,padding:"12px",border:`1px solid ${T.border}`}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:8,marginBottom:8,alignItems:"center"}}>
+            <input placeholder="Name (e.g. Insurance)" value={c.name} onChange={e=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.map(x=>x.id===c.id?{...x,name:e.target.value}:x)}))} style={inp}/>
+            <input type="number" placeholder="Amount" value={c.amount||""} onChange={e=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.map(x=>x.id===c.id?{...x,amount:e.target.value}:x)}))} style={{...inp,width:100}}/>
+            <button onClick={()=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.filter(x=>x.id!==c.id)}))} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:20,padding:"0 6px"}}>×</button>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <div><div style={{fontSize:11,color:T.textMuted,marginBottom:3}}>Start from (blank = always)</div><input type="month" value={c.startFrom||""} onChange={e=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.map(x=>x.id===c.id?{...x,startFrom:e.target.value}:x)}))} style={inp}/></div>
+            <div><div style={{fontSize:11,color:T.textMuted,marginBottom:3}}>End month (blank = ongoing)</div><input type="month" value={c.endMonth||""} onChange={e=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.map(x=>x.id===c.id?{...x,endMonth:e.target.value}:x)}))} style={inp}/></div>
+          </div>
         </div>)}
       </div>
-      <button onClick={()=>setP(v=>({...v,fixedCommitments:[...(v.fixedCommitments||[]),{id:`c${Date.now()}`,name:"",amount:""}]}))} style={{padding:"10px",background:"transparent",border:`1px dashed ${T.borderMid}`,borderRadius:10,color:T.textMuted,fontFamily:"inherit",fontSize:14,cursor:"pointer",width:"100%",marginBottom:18}}>+ Add commitment</button>
+      <button onClick={()=>setP(v=>({...v,fixedCommitments:[...(v.fixedCommitments||[]),{id:`c${Date.now()}`,name:"",amount:"",startFrom:"",endMonth:""}]}))} style={{padding:"10px",background:"transparent",border:`1px dashed ${T.borderMid}`,borderRadius:10,color:T.textMuted,fontFamily:"inherit",fontSize:14,cursor:"pointer",width:"100%",marginBottom:18}}>+ Add commitment</button>
       <Btn onClick={finish}>Let's go →</Btn>
       <Btn variant="ghost" onClick={finish} style={{marginTop:10}}>Skip for now</Btn>
     </div>
@@ -698,6 +752,7 @@ export default function App(){
   const [toast,setToast]=useState("");
   const [quickAddOpen,setQuickAddOpen]=useState(false);
   const [editHintSeen,setEditHintSeen]=useState(false);
+  const [tutorialDismissed,setTutorialDismissed]=useState(false);
   const [catFilter,setCatFilter]=useState("All");
   const [restoreCandidate,setRestoreCandidate]=useState(null);
   const [showReset,setShowReset]=useState(false);
@@ -714,6 +769,7 @@ export default function App(){
     const c=lsLoad("catExcludeHistory"); if(c) setCh(c);
     const ins=lsLoad("insights"); if(ins) setInsights(ins);
     const ehs=lsLoad("editHintSeen"); if(ehs) setEditHintSeen(true);
+    const td=lsLoad("tutorialDismissed"); if(td) setTutorialDismissed(true);
     const arc=lsLoad("archive"); if(arc) setArchive(arc);
   },[]);
 
@@ -815,14 +871,16 @@ export default function App(){
 
   const editTx=async draft=>{ await saveMD(selectedMonth,{txs:(md.txs||[]).map(t=>t.id===draft.id?draft:t)}); showToast("Updated"); };
 
-  const addManual=async()=>{
-    if(!form.description.trim()||!form.amount||isNaN(+form.amount)||+form.amount<=0) return;
-    const tx={id:Date.now(),date:form.date,description:form.description.trim(),category:form.category,amount:parseFloat(form.amount),source:"manual"};
-    const month=monthKey(form.date);
+  const addManual=async({description,amount,category,date}={})=>{
+    const d=description||form.description; const a=amount||form.amount;
+    const c=category||form.category; const dt=date||form.date;
+    if(!d||!d.trim()||!a||isNaN(+a)||+a<=0) return;
+    const tx={id:Date.now(),date:dt,description:d.trim(),category:c,amount:parseFloat(a),source:"manual"};
+    const month=monthKey(dt);
     if(profile?.startMonth&&month<profile.startMonth){ showToast("⚠ Before your start month"); return; }
     const ex=(monthlyData[month]||{}).txs||[];
     await saveMD(month,{txs:[tx,...ex]});
-    setForm(f=>({...f,description:"",amount:""})); showToast("Transaction added"); setQuickAddOpen(false);
+    showToast("Transaction added");
     if(month!==selectedMonth) setSelectedMonth(month);
   };
 
@@ -866,7 +924,18 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         const amount=isCredit?-(Math.abs(parseFloat(t.amount)||0)):Math.abs(parseFloat(t.amount)||0);
         const validCats=[...CATS,...FIXED_CATS];
         const cat=validCats.includes(t.category)?t.category:"📦 Other";
-        if(isFixedCat(cat)&&!isCredit){ fixedDetected.push({id:`fd${i}`,description:t.description||"Unknown",category:cat,rawAmount:Math.abs(amount),date:t.date||todayStr()}); return null; }
+        if(isFixedCat(cat)&&!isCredit){
+          fixedDetected.push({
+            id:`fd${Date.now()}${i}`,
+            description:t.description||"Unknown",
+            category:cat,
+            rawAmount:Math.abs(amount),
+            date:t.date||todayStr(),
+            // keep full tx so we can put it back if user skips
+            fullTx:{id:Date.now()+i+10000,date:t.date||todayStr(),description:t.description||"Unknown",amount,category:cat,source:"imported",checked:false,habitReason:null}
+          });
+          return null;
+        }
         const reason=habitReason({description:(t.description||"").toLowerCase().trim(),category:cat},mf,cf);
         return {id:Date.now()+i,date:t.date||todayStr(),description:t.description||"Unknown",amount,category:cat,source:"imported",checked:!reason,habitReason:reason};
       }).filter(Boolean);
@@ -886,7 +955,18 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     finally{ setUploading(false); e.target.value=""; setTimeout(()=>setUploadMsg(""),12000); }
   };
 
-  const handleFixedCommitConfirm=confirmed=>{ const existing=profile?.fixedCommitments||[]; const existNames=new Set(existing.map(c=>c.name?.toLowerCase())); const toAdd=confirmed.filter(c=>!existNames.has(c.description?.toLowerCase())).map(c=>({id:`c${Date.now()}${Math.random()}`,name:c.description,amount:c.rawAmount,startFrom:"",endMonth:""})); if(toAdd.length>0){saveProfile({...profile,fixedCommitments:[...existing,...toAdd]});showToast(`✓ Added ${toAdd.length} fixed commitment${toAdd.length>1?"s":""}`);}setFixedCommitDetected(null); };
+  const handleFixedCommitConfirm=confirmed=>{
+    const existing=profile?.fixedCommitments||[];
+    const existNames=new Set(existing.map(c=>c.name?.toLowerCase()));
+    const toAdd=confirmed.filter(c=>!existNames.has(c.description?.toLowerCase())).map(c=>({id:`c${Date.now()}${Math.random()}`,name:c.description,amount:c.rawAmount,startFrom:"",endMonth:""}));
+    if(toAdd.length>0){saveProfile({...profile,fixedCommitments:[...existing,...toAdd]});showToast(`✓ Added ${toAdd.length} fixed commitment${toAdd.length>1?"s":""}`);}
+    // Items NOT confirmed go back into review as unchecked transactions
+    const allDetected=fixedCommitDetected||[];
+    const confirmedDescs=new Set(confirmed.map(c=>c.description));
+    const toReview=allDetected.filter(c=>!confirmedDescs.has(c.description)&&c.fullTx).map(c=>c.fullTx);
+    if(toReview.length>0) setPendingTxs(p=>[...p,...toReview]);
+    setFixedCommitDetected(null);
+  };
   const handleRecurringConfirm=confirmed=>{ const existing=profile?.fixedCommitments||[]; const existNames=new Set(existing.map(c=>c.name?.toLowerCase())); const toAdd=confirmed.filter(s=>!existNames.has(s.description?.toLowerCase())).map(s=>({id:`c${Date.now()}${Math.random()}`,name:s.description,amount:Math.round(s.amount*100)/100,startFrom:"",endMonth:""})); if(toAdd.length>0){saveProfile({...profile,fixedCommitments:[...existing,...toAdd]});showToast(`✓ Added ${toAdd.length} recurring commitment${toAdd.length>1?"s":""}`);}setRecurringDetected(null); };
 
   const generateInsights=async()=>{
@@ -938,6 +1018,29 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       {sub&&<div style={{fontSize:11,color:sub.col,fontFamily:"'DM Mono'",marginTop:5}}>{sub.text}</div>}
     </div>;
     return <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {/* Getting Started */}
+      {!tutorialDismissed&&<Card style={{border:`1px solid ${T.accentBorder}`,background:T.accentMuted}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+          <div style={{fontSize:15,fontWeight:700,color:T.accent}}>👋 Getting Started</div>
+          <button onClick={()=>{setTutorialDismissed(true);lsSave("tutorialDismissed",true);}} style={{background:"none",border:"none",color:T.accent,fontSize:18,cursor:"pointer",padding:"0 4px",opacity:.6,lineHeight:1}}>×</button>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {[
+            {icon:"👤",label:"Set up your profile",desc:"Add income streams and fixed commitments",tab:"profile",done:incTotal>0},
+            {icon:"➕",label:"Import your first statement",desc:"Upload a PDF or CSV from your bank",tab:"add",done:countAllTx(monthlyData)>0},
+            {icon:"📋",label:"Review imported transactions",desc:"Check and approve what Claude extracted",tab:"review",done:countAllTx(monthlyData)>0&&pendingTxs.length===0},
+            {icon:"💰",label:"Explore your breakdown",desc:"See spending by category and savings rate",tab:"money",done:countAllTx(monthlyData)>0},
+          ].map(({icon,label,desc,tab:t,done})=><div key={label} onClick={()=>!done&&setTab(t)} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",background:done?T.accentMuted:T.surface,borderRadius:10,border:`1px solid ${done?T.accentBorder:T.border}`,cursor:done?"default":"pointer",opacity:done?0.6:1}}>
+            <span style={{fontSize:20,flexShrink:0}}>{done?"✅":icon}</span>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:600,color:done?T.textMuted:T.textPrimary}}>{label}</div>
+              <div style={{fontSize:12,color:T.textMuted,marginTop:1}}>{desc}</div>
+            </div>
+            {!done&&<span style={{fontSize:14,color:T.accent,opacity:.6,flexShrink:0}}>→</span>}
+          </div>)}
+        </div>
+        {[incTotal>0,countAllTx(monthlyData)>0].every(Boolean)&&<button onClick={()=>{setTutorialDismissed(true);lsSave("tutorialDismissed",true);}} style={{marginTop:12,width:"100%",padding:"9px",background:T.accent,border:"none",borderRadius:10,fontFamily:"inherit",fontSize:13,fontWeight:600,color:T.accentText,cursor:"pointer"}}>All done — hide this</button>}
+      </Card>}
       {/* Hero */}
       <Card>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
@@ -956,6 +1059,14 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       </Card>
       {/* Chart */}
       <Card><SLabel>6-Month Overview</SLabel><SixMonthChart monthlyData={monthlyData} incomeStreams={streams} selectedMonth={selectedMonth} startMonth={profile.startMonth}/></Card>
+      {/* Insights */}
+      <Card>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:insights.text?14:0}}>
+          <div><SLabel style={{margin:"0 0 4px"}}>Claude Insights</SLabel><p style={{margin:0,fontSize:12,color:fullMonths>=3?T.positive:T.textMuted}}>{fullMonths}/3 months {fullMonths>=3?"✓":"— unlocks after 3 full months"}</p>{insights.timestamp&&<p style={{margin:"4px 0 0",fontSize:11,color:T.textMuted}}>Last: {new Date(insights.timestamp).toLocaleDateString("en-SG",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</p>}</div>
+          <button onClick={generateInsights} disabled={loadingInsights||fullMonths<3} style={{padding:"7px 14px",background:fullMonths>=3?T.accentMuted:"transparent",border:`1px solid ${fullMonths>=3?T.accentBorder:T.border}`,borderRadius:10,color:fullMonths>=3?T.accent:T.textMuted,fontSize:12,fontFamily:"inherit",cursor:fullMonths<3?"default":"pointer",fontWeight:600,flexShrink:0}}>{loadingInsights?"Analysing…":insights.text?"↻ Refresh":"Generate"}</button>
+        </div>
+        {insights.text?<InsightCards text={insights.text}/>:fullMonths>=3&&<p style={{fontSize:13,color:T.textMuted,margin:"10px 0 0"}}>Tap Generate to analyse your patterns.</p>}
+      </Card>
       {/* Budget alerts */}
       {profile.budgets&&Object.keys(profile.budgets).length>0&&(()=>{ const alerts=byCat.filter(([cat,amt])=>{ const b=profile.budgets[cat]; return b&&b>0&&amt>b*0.8; }); if(!alerts.length) return null; return <Card style={{border:`1px solid ${T.warning}50`,background:T.warning+"08"}}><SLabel style={{color:T.warning}}>Budget Alerts</SLabel>{alerts.map(([cat,amt])=>{ const b=profile.budgets[cat]; const pct=amt/b*100; return <div key={cat} style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:14,color:T.textPrimary}}>{cat}</span><span style={{fontSize:13,fontFamily:"'DM Mono'",color:pct>=100?T.negative:T.warning,fontWeight:600}}>{fmt(amt)} / {fmt(b)}</span></div><div style={{height:4,background:T.border,borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(100,pct)}%`,background:pct>=100?T.negative:T.warning,borderRadius:4}}/></div></div>; })}</Card>; })()}
       {/* Nudge */}
@@ -964,20 +1075,13 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         <span style={{fontSize:22,color:nudge.color,opacity:.5}}>→</span>
       </div>}
       {/* Quick add */}
-      {quickAddOpen?<Card><SLabel>Quick Add</SLabel><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <input type="text" placeholder="Description" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&addManual()} style={inp}/>
-        <input type="number" placeholder="Amount" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&addManual()} style={inp}/>
-        <select value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))} style={{...inp,gridColumn:"1/-1"}}>{CATS.map(c=><option key={c}>{c}</option>)}</select>
-        <input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={inp}/>
-        <Btn onClick={addManual} style={{padding:"11px",fontSize:14}}>+ Add</Btn>
-        <Btn variant="ghost" onClick={()=>setQuickAddOpen(false)} style={{padding:"11px",fontSize:14}}>Cancel</Btn>
-      </div></Card>:<button onClick={()=>setQuickAddOpen(true)} style={{padding:"14px",background:"transparent",border:`1.5px dashed ${T.borderMid}`,borderRadius:14,color:T.textMuted,fontFamily:"inherit",fontSize:14,cursor:"pointer",width:"100%"}}>+ Quick add transaction</button>}
-      {/* Recent */}
-      {committedTxs.length>0&&<Card>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><SLabel style={{margin:0}}>Recent Transactions</SLabel><span style={{fontSize:13,color:T.accent,cursor:"pointer",fontWeight:500}} onClick={()=>setTab("money")}>See all →</span></div>
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>{committedTxs.slice(0,5).map(t=><TxRow key={t.id} tx={t} fmt={fmt} onEdit={editTx} onArchive={archiveTx} customCategories={profile.customCategories}/>)}</div>
-        {!editHintSeen&&<div style={{marginTop:10,padding:"8px 14px",background:T.accentMuted,borderRadius:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:12,color:T.accent}}>Tap ✎ to edit · × to archive</span><button onClick={()=>{setEditHintSeen(true);lsSave("editHintSeen",true);}} style={{background:"none",border:"none",color:T.accent,fontSize:12,cursor:"pointer",fontFamily:"inherit",opacity:.7}}>Got it ×</button></div>}
-      </Card>}
+      {quickAddOpen?<Card><SLabel>Quick Add</SLabel>
+        <ManualAddForm categories={CATS} defaultDate={todayStr()} onAdd={({description,amount,category,date})=>{
+          addManual({description,amount,category,date});
+          setQuickAddOpen(false);
+        }}/>
+        <Btn variant="ghost" onClick={()=>setQuickAddOpen(false)} style={{padding:"10px",fontSize:13,marginTop:8}}>Cancel</Btn>
+      </Card>:<button onClick={()=>setQuickAddOpen(true)} style={{padding:"14px",background:"transparent",border:`1.5px dashed ${T.borderMid}`,borderRadius:14,color:T.textMuted,fontFamily:"inherit",fontSize:14,cursor:"pointer",width:"100%"}}>+ Quick add transaction</button>}
     </div>;
   };
 
@@ -1005,13 +1109,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     </Card>
     <Card>
       <SLabel>Add Manually</SLabel>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <input type="text" placeholder="Description" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&addManual()} style={inp}/>
-        <input type="number" placeholder="Amount" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&addManual()} style={inp}/>
-        <select value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))} style={{...inp,gridColumn:"1/-1"}}>{CATS.map(c=><option key={c}>{c}</option>)}</select>
-        <input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={inp}/>
-        <Btn onClick={addManual} style={{padding:"11px",fontSize:14}}>+ Add</Btn>
-      </div>
+      <ManualAddForm categories={CATS} defaultDate={todayStr()} onAdd={addManual}/>
     </Card>
     {/* Archive */}
     <div>
@@ -1086,7 +1184,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           <button onClick={()=>makeShareCard(selectedMonth,profile,md,streams)} style={{padding:"6px 14px",background:"transparent",border:`1px solid ${T.border}`,borderRadius:9,color:T.textSecondary,fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:500}}>🖼 Share</button>
         </div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:16}}>
+      <div style={{display:"grid",gridTemplateColumns:isDesktop?"repeat(4,1fr)":"repeat(2,1fr)",gap:12,marginBottom:16}}>
         {[["Income",incTotal,T.positive],["Fixed",fixedTotal,T.info],["Variable",varTotal,T.negative],["Saved",saved,saved>=0?T.positive:T.negative]].map(([label,val,color])=><div key={label} style={{background:T.bg,borderRadius:12,padding:"14px 16px",border:`1px solid ${T.border}`}}>
           <div style={{fontSize:11,color:T.textMuted,marginBottom:6,letterSpacing:.5}}>{label}</div>
           <div style={{fontSize:18,fontWeight:700,fontFamily:"'DM Mono'",color}}>{incTotal===0&&label==="Saved"?"—":fmt(val)}</div>
@@ -1125,14 +1223,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           {["All",...Object.keys(Object.fromEntries(byCat))].map(c=><button key={c} onClick={()=>setCatFilter(c)} style={{padding:"4px 12px",borderRadius:20,border:`1px solid ${catFilter===c?T.accent:T.borderMid}`,background:catFilter===c?T.accentMuted:"transparent",color:catFilter===c?T.accent:T.textMuted,fontSize:12,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit",flexShrink:0,fontWeight:catFilter===c?600:400}}>{c==="All"?"All":c.split(" ")[0]}</button>)}
         </div>}
       </div>
-      {filteredTxs.length===0?<p style={{fontSize:14,color:T.textMuted,margin:0}}>No transactions for {monthLabel(selectedMonth)}</p>:<div style={{display:"flex",flexDirection:"column",gap:8}}>{filteredTxs.map(t=><TxRow key={t.id} tx={t} onArchive={archiveTx} onEdit={editTx} fmt={fmt} customCategories={profile.customCategories}/>)}</div>}
-    </Card>
-    <Card>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
-        <div><SLabel style={{margin:"0 0 4px"}}>Claude Insights</SLabel><p style={{margin:0,fontSize:12,color:fullMonths>=3?T.positive:T.textMuted}}>{fullMonths}/3 full months {fullMonths>=3?"✓":"— needs income + transactions"}</p>{insights.timestamp&&<p style={{margin:"4px 0 0",fontSize:11,color:T.textMuted}}>Last: {new Date(insights.timestamp).toLocaleDateString("en-SG",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</p>}</div>
-        <button onClick={generateInsights} disabled={loadingInsights||fullMonths<3} style={{padding:"8px 16px",background:"transparent",border:`1px solid ${fullMonths>=3?T.accentBorder:T.border}`,borderRadius:10,color:fullMonths>=3?T.accent:T.textMuted,fontSize:13,fontFamily:"inherit",cursor:fullMonths<3?"default":"pointer",fontWeight:500,flexShrink:0}}>{loadingInsights?"Analysing…":insights.text?"Regenerate":"Generate"}</button>
-      </div>
-      {insights.text?<InsightCards text={insights.text}/>:<p style={{fontSize:14,color:T.textMuted,margin:0}}>{fullMonths<3?"Keep tracking — insights unlock after 3 full months of data.":"Tap Generate to analyse your patterns."}</p>}
+      {filteredTxs.length===0?<p style={{fontSize:14,color:T.textMuted,margin:0}}>No transactions for {monthLabel(selectedMonth)}</p>:<div style={{display:"flex",flexDirection:"column",gap:6}}>{filteredTxs.map(t=><CompactTxRow key={t.id} tx={t} onArchive={archiveTx} onEdit={editTx} fmt={fmt} customCategories={profile.customCategories}/>)}</div>}
     </Card>
     <Card>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -1241,11 +1332,13 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       <Card>
         <SLabel>Identity</SLabel>
         <div style={{display:"flex",alignItems:"center",gap:18,marginBottom:18}}>
-          <div onClick={()=>avatarRef.current.click()} style={{width:72,height:72,borderRadius:"50%",background:T.accentMuted,border:`2px dashed ${T.accentBorder}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",overflow:"hidden",flexShrink:0,position:"relative"}}>
-            {p.avatar
-              ?<img src={p.avatar} alt="" style={{width:72,height:72,objectFit:"cover",borderRadius:"50%",display:"block"}}/>
-              :<span style={{fontSize:28,color:T.accent}}>{p.name?p.name[0].toUpperCase():"+"}</span>}
-            <div style={{position:"absolute",bottom:0,right:0,width:22,height:22,borderRadius:"50%",background:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:T.accentText}}>✎</div>
+          <div style={{position:"relative",flexShrink:0,width:72,height:72}}>
+            <div onClick={()=>avatarRef.current.click()} style={{width:72,height:72,borderRadius:"50%",background:T.accentMuted,border:`2px dashed ${T.accentBorder}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",overflow:"hidden"}}>
+              {p.avatar
+                ?<img src={p.avatar} alt="" style={{width:72,height:72,objectFit:"cover",borderRadius:"50%",display:"block"}}/>
+                :<span style={{fontSize:28,color:T.accent}}>{p.name?p.name[0].toUpperCase():"+"}</span>}
+            </div>
+            <div onClick={()=>avatarRef.current.click()} style={{position:"absolute",bottom:-2,right:-2,width:24,height:24,borderRadius:"50%",background:T.accent,border:`2px solid ${T.surface}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:T.accentText,cursor:"pointer",zIndex:1}}>✎</div>
           </div>
           <input ref={avatarRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleAv}/>
           <div style={{flex:1,display:"flex",flexDirection:"column",gap:10}}>
@@ -1408,9 +1501,23 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           </button>
           {(()=>{
             const ab=lsLoad("autoBackups")||[];
-            return ab.length>0&&<div style={{padding:"12px 16px",background:T.surface2,borderRadius:11,border:`1px solid ${T.border}`,fontSize:13,color:T.textMuted,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div>Auto-backup<div style={{fontSize:11,marginTop:2}}>{ab.length} snapshot{ab.length!==1?"s":" "} saved locally</div></div>
-              <div style={{textAlign:"right",fontSize:12}}>Last: {new Date(ab[0]?.createdAt).toLocaleDateString("en-SG",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</div>
+            if(!ab.length) return null;
+            return <div style={{background:T.surface2,borderRadius:11,border:`1px solid ${T.border}`,overflow:"hidden"}}>
+              <div style={{padding:"10px 16px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:12,color:T.textMuted,fontFamily:"'DM Mono'",letterSpacing:1}}>AUTO-BACKUPS ({ab.length})</span>
+                <span style={{fontSize:11,color:T.textMuted}}>Tap to restore</span>
+              </div>
+              {ab.slice(0,5).map((snap,i)=>{
+                const date=new Date(snap.createdAt);
+                const txCount=countAllTx(snap.monthlyData||{});
+                return <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 16px",borderBottom:i<Math.min(ab.length,5)-1?`1px solid ${T.border}`:"none"}}>
+                  <div>
+                    <div style={{fontSize:13,color:T.textPrimary,fontWeight:500}}>{date.toLocaleDateString("en-SG",{day:"numeric",month:"short",year:"numeric"})}</div>
+                    <div style={{fontSize:11,color:T.textMuted,marginTop:2}}>{date.toLocaleTimeString("en-SG",{hour:"2-digit",minute:"2-digit"})} · {txCount} transactions</div>
+                  </div>
+                  <button onClick={()=>setRestCand(snap)} style={{padding:"5px 14px",background:T.accentMuted,border:`1px solid ${T.accentBorder}`,borderRadius:8,color:T.accent,fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:600,flexShrink:0}}>Restore</button>
+                </div>;
+              })}
             </div>;
           })()}
         </div>
@@ -1444,7 +1551,12 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       {toast&&<Toast msg={toast} onDone={()=>setToast("")}/>}
       {restoreCandidate&&<RestoreModal backup={restoreCandidate} onConfirm={()=>doRestore(restoreCandidate)} onClose={()=>setRestoreCandidate(null)}/>}
       {showReset&&<ResetModal onConfirm={doReset} onClose={()=>setShowReset(false)} onDownloadFirst={()=>{dlBackup(profile,monthlyData,eh,ch,insights,archive);showToast("Backup downloaded");}}/>}
-      {fixedCommitDetected&&<FixedCommitModal detected={fixedCommitDetected} fmt={fmt} onConfirm={handleFixedCommitConfirm} onSkip={()=>setFixedCommitDetected(null)}/>}
+      {fixedCommitDetected&&<FixedCommitModal detected={fixedCommitDetected} fmt={fmt} onConfirm={handleFixedCommitConfirm} onSkip={()=>{
+        // return all detected items to review as unchecked
+        const toReview=(fixedCommitDetected||[]).filter(c=>c.fullTx).map(c=>c.fullTx);
+        if(toReview.length>0) setPendingTxs(p=>[...p,...toReview]);
+        setFixedCommitDetected(null);
+      }}/>}
       {recurringDetected&&<RecurringModal suggestions={recurringDetected} onConfirm={handleRecurringConfirm} onDismiss={()=>setRecurringDetected(null)}/>}
       <input ref={restoreRef} type="file" accept=".json" style={{display:"none"}} onChange={handleRestoreFile}/>
 
@@ -1484,6 +1596,10 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
             <span style={{fontSize:13,color:T.textSecondary}}>Income</span>
             <span style={{fontFamily:"'DM Mono'",fontSize:13,color:T.positive,fontWeight:600}}>{fmt(incTotal)}</span>
           </div>
+          {fixedTotal>0&&<div style={{display:"flex",justifyContent:"space-between",marginBottom:7}}>
+            <span style={{fontSize:13,color:T.textSecondary}}>Fixed</span>
+            <span style={{fontFamily:"'DM Mono'",fontSize:13,color:T.info,fontWeight:600}}>{fmt(fixedTotal)}</span>
+          </div>}
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:7}}>
             <span style={{fontSize:13,color:T.textSecondary}}>Spent</span>
             <span style={{fontFamily:"'DM Mono'",fontSize:13,color:T.negative,fontWeight:600}}>{fmt(varTotal)}</span>
