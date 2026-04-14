@@ -220,7 +220,7 @@ function UIGallery(){
 
 // ── Waitlist Form ─────────────────────────────────────────────────────────────
 // Update this number manually when you want to show progress
-const WAITLIST_COUNT = 39;
+const WAITLIST_COUNT = 0;
 
 function WaitlistForm() {
   const [email,setEmail]=useState("");
@@ -332,6 +332,7 @@ export default function Landing({onEnter}){
         <NavTypewriter/>
         <div style={{display:"flex",gap:12,alignItems:"center"}}>
           <button onClick={()=>setPrivacyOpen(true)} style={{background:"none",border:"none",color:"#888898",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>Privacy</button>
+          <button onClick={onEnter} style={{padding:"8px 16px",background:"transparent",border:"1px solid rgba(255,255,255,0.18)",borderRadius:10,fontFamily:"inherit",fontWeight:600,fontSize:13,color:"#EEEAE0",cursor:"pointer"}}>Beta →</button>
         </div>
       </nav>
 
@@ -363,6 +364,12 @@ export default function Landing({onEnter}){
           </div>
           <WaitlistForm/>
         </div>
+
+        <div className="fu d6" style={{fontSize:13,color:"#555568"}}>
+          Already in beta?{" "}
+          <button onClick={onEnter} style={{background:"none",border:"none",color:"#888898",cursor:"pointer",fontFamily:"inherit",fontSize:13,textDecoration:"underline",textUnderlineOffset:3}}>Open the app →</button>
+        </div>
+      </section>
 
       {/* How it works */}
       <section style={{maxWidth:760,margin:"0 auto 88px",padding:"0 28px"}}>
