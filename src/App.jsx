@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback, createContext, useContext } from "react";
+import { PrivacyModal } from "./Landing.jsx";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const BUILTIN_CATEGORIES = ["🍔 Food & Dining","🛒 Groceries","🚗 Transport","🎬 Entertainment","🏥 Health","👕 Shopping","💡 Utilities","✈️ Travel","📦 Other"];
@@ -182,6 +183,36 @@ function Btn({children,onClick,disabled,variant="accent",size="md",style}){
 }
 function Check({checked,onChange}){ const T=useTheme(); return <div onClick={onChange} style={{width:22,height:22,borderRadius:7,border:`1.5px solid ${checked?T.accent:T.borderMid}`,background:checked?T.accentMuted:"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,transition:"all .15s"}}>{checked&&<svg width="12" height="10" viewBox="0 0 12 10" fill="none"><path d="M1 5L4.5 8.5L11 1" stroke={T.accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}</div>; }
 function Toast({msg,onDone}){ const T=useTheme(); useEffect(()=>{const t=setTimeout(onDone,2800);return()=>clearTimeout(t);},[onDone]); return <div style={{position:"fixed",bottom:96,left:"50%",transform:"translateX(-50%)",background:T.accent,color:T.accentText,borderRadius:24,padding:"10px 26px",fontSize:14,fontWeight:600,zIndex:2999,whiteSpace:"nowrap",pointerEvents:"none",boxShadow:"0 4px 24px rgba(0,0,0,0.25)"}}>{msg}</div>; }
+
+// ── PulseDot — breathing accent dot for logo ──────────────────────────────────
+function PulseDot({size=7,style}){
+  const T=useTheme();
+  return <>
+    <style>{`@keyframes smtm-pulse{0%,100%{opacity:.35;transform:scale(1)}50%{opacity:1;transform:scale(1.25)}}`}</style>
+    <div style={{width:size,height:size,borderRadius:"50%",background:T.accent,animation:"smtm-pulse 2.4s ease-in-out infinite",...style}}/>
+  </>;
+}
+
+// ── CountUp — animates a number from 0 to target on mount/change ──────────────
+function CountUp({value,format,duration=900}){
+  const [display,setDisplay]=useState(0);
+  const prev=useRef(0); const raf=useRef(null);
+  useEffect(()=>{
+    const start=prev.current; const end=value; const startTime=performance.now();
+    const tick=now=>{
+      const elapsed=now-startTime; const progress=Math.min(elapsed/duration,1);
+      // ease-out cubic
+      const eased=1-Math.pow(1-progress,3);
+      const current=start+(end-start)*eased;
+      setDisplay(current);
+      if(progress<1) raf.current=requestAnimationFrame(tick);
+      else { setDisplay(end); prev.current=end; }
+    };
+    raf.current=requestAnimationFrame(tick);
+    return()=>{ if(raf.current) cancelAnimationFrame(raf.current); };
+  },[value,duration]);
+  return <span>{format(display)}</span>;
+}
 function EditableAmt({value,onSave,fmt,color}){
   const T=useTheme(); const [ed,setEd]=useState(false); const [draft,setDraft]=useState("");
   if(ed) return <input type="number" value={draft} onChange={e=>setDraft(e.target.value)} autoFocus style={{width:110,padding:"5px 10px",background:T.surface2,border:`1px solid ${T.accent}`,borderRadius:8,color:T.textPrimary,fontFamily:"'DM Mono'",fontSize:14,outline:"none"}} onKeyDown={e=>{if(e.key==="Enter"){onSave(parseFloat(draft)||0);setEd(false);}if(e.key==="Escape")setEd(false);}} onBlur={()=>{onSave(parseFloat(draft)||0);setEd(false);}}/>;
@@ -755,6 +786,7 @@ export default function App(){
   const [catFilter,setCatFilter]=useState("All");
   const [restoreCandidate,setRestoreCandidate]=useState(null);
   const [showReset,setShowReset]=useState(false);
+  const [showPrivacy,setShowPrivacy]=useState(false);
   const [fixedCommitDetected,setFixedCommitDetected]=useState(null);
   const [recurringDetected,setRecurringDetected]=useState(null);
   const [archiveOpen,setArchiveOpen]=useState(false);
@@ -891,11 +923,29 @@ export default function App(){
 4. Do NOT skip, group, or summarise. Extract every row.
 Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":"cleaned merchant name","amount":positive_number,"isCredit":boolean,"category":string}. Output ONLY the JSON array.`;
     const body=typeof content==="string"?`${prompt}\n\nStatement:\n${content}`:[...content,{type:"text",text:prompt}];
-    const res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:16000,messages:[{role:"user",content:body}]})});
-    if(!res.ok){ const e=await res.json().catch(()=>({})); throw new Error(e.error||`Server error ${res.status}`); }
-    const data=await res.json(); if(data.error) throw new Error(data.error);
-    let raw=data.content?.map(b=>b.text||"").join("").trim().replace(/^```json|^```|```$/gm,"").trim();
-    if(!raw.endsWith("]")){ const lb=raw.lastIndexOf("}"); if(lb!==-1) raw=raw.slice(0,lb+1)+"]"; }
+    const controller=new AbortController();
+    const timeoutId=setTimeout(()=>controller.abort(),110000);
+    let res;
+    try{ res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:16000,messages:[{role:"user",content:body}]}),signal:controller.signal}); }
+    finally{ clearTimeout(timeoutId); }
+    if(!res.ok){ let msg=`Server error ${res.status}`; try{const e=await res.json();msg=e.error||e.detail||msg;}catch(e){} throw new Error(msg); }
+    // Read SSE stream — server sends chunks then a final {done:true,content:[...]} event
+    const reader=res.body.getReader(); const dec=new TextDecoder();
+    let finalData=null;
+    while(true){
+      const {done,value}=await reader.read(); if(done) break;
+      const text=dec.decode(value,{stream:true});
+      for(const line of text.split("\n")){
+        if(!line.startsWith("data: ")) continue;
+        const d=line.slice(6).trim(); if(!d) continue;
+        try{ const p=JSON.parse(d); if(p.done&&p.content) finalData=p; if(p.error) throw new Error(p.error); }
+        catch(e){ if(e.message&&!e.message.startsWith("Unexpected")) throw e; }
+      }
+    }
+    if(!finalData) throw new Error("No response received from API");
+    let raw=finalData.content?.map(b=>b.text||"").join("").trim().replace(/^```json|^```|```$/gm,"").trim();
+    if(!raw||!raw.startsWith("[")) throw new Error("No valid JSON returned from API");
+    if(!raw.endsWith("]")){ const lb=raw.lastIndexOf("}"); if(lb!==-1) raw=raw.slice(0,lb+1)+"]"; else throw new Error("Incomplete response — try a smaller file"); }
     return JSON.parse(raw);
   };
 
@@ -973,8 +1023,11 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     try{
       const hist=Object.entries(monthlyData).filter(([m])=>!profile?.startMonth||m>=profile.startMonth).sort().map(([month,md])=>{ const txs=md.txs||[]; const inc=totalIncome(streams,md.incomeOverrides||{},month); const total=txs.reduce((s,t)=>s+t.amount,0); const byCat={}; txs.forEach(t=>{byCat[t.category]=(byCat[t.category]||0)+t.amount;}); return `${month} | Income: ${inc} | Spending: ${total.toFixed(2)} | Saved: ${(inc-total).toFixed(2)}\n${Object.entries(byCat).map(([c,a])=>`  ${c}: ${a.toFixed(2)}`).join("\n")}`; }).join("\n\n");
       const res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1200,messages:[{role:"user",content:`You are a personal finance advisor for a Singapore user. Analyse this spending and income data. Give 5-6 specific, actionable insights using actual numbers. Be direct and friendly. Each insight on a separate line.\n\n${hist}`}]})});
-      const d=await res.json(); const text=d.content?.map(b=>b.text||"").join("").trim();
-      const newIns={text,timestamp:new Date().toISOString()}; setInsights(newIns); lsSave("insights",newIns);
+      if(!res.ok) throw new Error(`Server error ${res.status}`);
+      const reader=res.body.getReader(); const dec=new TextDecoder(); let finalData=null;
+      while(true){ const {done,value}=await reader.read(); if(done) break; const text=dec.decode(value,{stream:true}); for(const line of text.split("\n")){ if(!line.startsWith("data: ")) continue; const d=line.slice(6).trim(); if(!d) continue; try{ const p=JSON.parse(d); if(p.done&&p.content) finalData=p; }catch(e){} } }
+      const insText=finalData?.content?.map(b=>b.text||"").join("").trim()||"";
+      const newIns={text:insText,timestamp:new Date().toISOString()}; setInsights(newIns); lsSave("insights",newIns);
     }catch{ setInsights({text:"Couldn't generate insights. Try again.",timestamp:null}); }
     setLoadingInsights(false);
   };
@@ -1051,7 +1104,13 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           {statBox("Spent",fmt(varTotal),T.negative,prevVarTotal>0?{col:varTotal<=prevVarTotal?T.positive:T.negative,text:`${varTotal<=prevVarTotal?"-":"+"}${fmt(Math.abs(varTotal-prevVarTotal))} vs last mo`}:null)}
           {incTotal===0
             ?<div style={{background:T.bg,borderRadius:14,padding:isDesktop?"18px 20px":"14px 16px",border:`1px solid ${T.border}`,display:"flex",alignItems:"center"}}><span style={{fontSize:12,color:T.textMuted,cursor:"pointer"}} onClick={()=>setTab("profile")}>Set up income →</span></div>
-            :statBox("Saved",fmt(saved),saved>=0?T.positive:T.negative,prevSaved!==0?{col:saved>=prevSaved?T.positive:T.negative,text:`${saved>=prevSaved?"+":"-"}${fmt(Math.abs(saved-prevSaved))} vs last mo`}:null)}
+            :<div style={{background:T.bg,borderRadius:14,padding:isDesktop?"18px 20px":"14px 16px",border:`1px solid ${T.border}`}}>
+              <div style={{fontSize:11,color:T.textMuted,marginBottom:6,letterSpacing:.5}}>Saved</div>
+              <div style={{fontSize:isDesktop?24:18,fontWeight:700,fontFamily:"'DM Mono'",color:saved>=0?T.positive:T.negative,lineHeight:1.1}}>
+                <CountUp value={saved} format={n=>{ const sym=CURRENCY_SYMBOLS[profile?.currency||"SGD"]; return `${n<0?"-":""}${sym}${Math.abs(n).toLocaleString("en-SG",{minimumFractionDigits:2,maximumFractionDigits:2})}`; }}/>
+              </div>
+              {prevSaved!==0&&<div style={{fontSize:10,color:saved>=prevSaved?T.positive:T.negative,fontFamily:"'DM Mono'",marginTop:5}}>{saved>=prevSaved?"+":"-"}{fmt(Math.abs(saved-prevSaved))} vs last mo</div>}
+            </div>}
         </div>
         {incTotal>0&&<>
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:13,color:T.textMuted}}>Savings rate</span><span style={{fontSize:14,fontFamily:"'DM Mono'",color:savingsRate>=20?T.positive:savingsRate>=10?T.warning:T.negative,fontWeight:700}}>{savingsRate.toFixed(1)}%</span></div>
@@ -1551,6 +1610,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
       {/* Global overlays */}
       {toast&&<Toast msg={toast} onDone={()=>setToast("")}/>}
+      {showPrivacy&&<PrivacyModal onClose={()=>setShowPrivacy(false)}/>}
       {restoreCandidate&&<RestoreModal backup={restoreCandidate} onConfirm={()=>doRestore(restoreCandidate)} onClose={()=>setRestoreCandidate(null)}/>}
       {showReset&&<ResetModal onConfirm={doReset} onClose={()=>setShowReset(false)} onDownloadFirst={()=>{dlBackup(profile,monthlyData,eh,ch,insights,archive);showToast("Backup downloaded");}}/>}
       {fixedCommitDetected&&<FixedCommitModal detected={fixedCommitDetected} fmt={fmt} onConfirm={handleFixedCommitConfirm} onSkip={()=>{
@@ -1566,7 +1626,10 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       {isDesktop&&<div style={{width:SIDEBAR_W,background:T.surface,borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"28px 14px",position:"fixed",top:0,left:0,bottom:0,zIndex:50,boxShadow:`4px 0 24px rgba(0,0,0,${T.bgLight?0.05:0.18})`}}>
         {/* Brand + avatar */}
         <div style={{marginBottom:24,padding:"0 6px"}}>
-          <div style={{fontSize:15,fontWeight:800,color:T.accent,letterSpacing:-0.3,lineHeight:1.2,marginBottom:14}}>Show Me<br/>The Money</div>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+            <div style={{fontSize:15,fontWeight:800,color:T.accent,letterSpacing:-0.3,lineHeight:1.2}}>Show Me<br/>The Money</div>
+            <PulseDot size={7} style={{marginTop:2,flexShrink:0}}/>
+          </div>
           <div style={{display:"flex",alignItems:"center",gap:12}}>
             {profile.avatar
               ?<img src={profile.avatar} alt="" style={{width:40,height:40,borderRadius:"50%",objectFit:"cover",border:`2px solid ${T.accentBorder}`,flexShrink:0}}/>
@@ -1614,6 +1677,11 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           <div style={{height:5,background:T.border,borderRadius:5,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(100,Math.max(0,savingsRate))}%`,background:savingsRate>=20?T.positive:savingsRate>=10?T.warning:T.negative,borderRadius:5,transition:"width .5s"}}/></div>
           <div style={{fontSize:11,color:savingsRate>=20?T.positive:savingsRate>=10?T.warning:T.negative,fontFamily:"'DM Mono'",fontWeight:600,marginTop:5,textAlign:"right"}}>{savingsRate.toFixed(1)}%</div>
         </div>}
+        {/* Sidebar footer links */}
+        <div style={{display:"flex",gap:14,padding:"14px 6px 0",borderTop:`1px solid ${T.border}`,marginTop:12}}>
+          <button onClick={()=>setShowPrivacy(true)} style={{background:"none",border:"none",color:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit",padding:0}}>🔒 Privacy</button>
+          <button onClick={()=>{localStorage.removeItem("smtm_entered");window.location.reload();}} style={{background:"none",border:"none",color:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit",padding:0}}>← Home</button>
+        </div>
       </div>}
 
       {/* ── Mobile header ── */}
@@ -1623,7 +1691,10 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
             {profile.avatar
               ?<img src={profile.avatar} alt="" style={{width:32,height:32,borderRadius:"50%",objectFit:"cover"}}/>
               :<div style={{width:32,height:32,borderRadius:"50%",background:T.accentMuted,border:`1px solid ${T.accentBorder}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,color:T.accent,fontWeight:700}}>{profile.name?profile.name[0].toUpperCase():"?"}</div>}
-            <div style={{fontSize:14,fontWeight:800,color:T.accent,letterSpacing:-0.3}}>Show Me The Money</div>
+            <div style={{display:"flex",alignItems:"center",gap:7}}>
+              <div style={{fontSize:14,fontWeight:800,color:T.accent,letterSpacing:-0.3}}>Show Me The Money</div>
+              <PulseDot size={6}/>
+            </div>
           </div>
           <MonthPicker value={selectedMonth} onChange={setSelectedMonth} startMonth={profile.startMonth}/>
         </div>
