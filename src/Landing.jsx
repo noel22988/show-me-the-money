@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 // ── Privacy Modal ─────────────────────────────────────────────────────────────
 export function PrivacyModal({ onClose }) {
@@ -31,6 +31,38 @@ export function PrivacyModal({ onClose }) {
   );
 }
 
+// ── NavTypewriter — types $how Me / The Money on loop ────────────────────────
+function NavTypewriter(){
+  const LINES=["$how Me","The Money"];
+  const full=LINES[0]+"||"+LINES[1];
+  const [typed,setTyped]=useState("");
+  const timerRef=useRef(null);
+
+  useEffect(()=>{
+    let cancelled=false;
+    const cycle=()=>{
+      if(cancelled) return;
+      setTyped("");
+      let i=0;
+      const tick=()=>{
+        if(cancelled) return;
+        i++; setTyped(full.slice(0,i));
+        if(i<full.length) timerRef.current=setTimeout(tick,42);
+        else timerRef.current=setTimeout(()=>{ if(!cancelled){ setTyped(""); cycle(); } },3000);
+      };
+      timerRef.current=setTimeout(tick,42);
+    };
+    cycle();
+    return()=>{ cancelled=true; clearTimeout(timerRef.current); };
+  },[]);
+
+  const parts=typed.split("||");
+  return <div style={{lineHeight:1.2,minWidth:80}}>
+    <div style={{fontSize:15,fontWeight:800,color:"#C8FF57",letterSpacing:-0.3}}>{parts[0]||""}<span style={{animation:"blink .7s step-end infinite",opacity:.5}}>|</span></div>
+    {parts.length>1&&<div style={{fontSize:15,fontWeight:800,color:"#C8FF57",letterSpacing:-0.3}}>{parts[1]}</div>}
+  </div>;
+}
+
 // ── Landing Page ──────────────────────────────────────────────────────────────
 export default function Landing({ onEnter }) {
   const [privacyOpen, setPrivacyOpen] = useState(false);
@@ -61,7 +93,7 @@ export default function Landing({ onEnter }) {
         <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=DM+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
         <style>{`
           @keyframes fadeUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
-          @keyframes pulse{0%,100%{opacity:.35;transform:scale(1)}50%{opacity:1;transform:scale(1.3)}}
+          @keyframes blink{0%,100%{opacity:.4}50%{opacity:0}}
           @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
           .fade-up{opacity:0;animation:fadeUp .7s ease forwards;}
           .d1{animation-delay:.1s}.d2{animation-delay:.2s}.d3{animation-delay:.3s}.d4{animation-delay:.4s}.d5{animation-delay:.5s}.d6{animation-delay:.6s}.d7{animation-delay:.7s}
@@ -73,10 +105,7 @@ export default function Landing({ onEnter }) {
 
         {/* Nav */}
         <nav style={{padding:"20px 32px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid rgba(255,255,255,0.06)",position:"sticky",top:0,background:"rgba(12,12,18,0.9)",backdropFilter:"blur(12px)",zIndex:50}}>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontSize:15,fontWeight:800,color:"#C8FF57",letterSpacing:-0.3}}>Show Me The Money</span>
-            <div style={{width:6,height:6,borderRadius:"50%",background:"#C8FF57",animation:"pulse 2.4s ease-in-out infinite"}}/>
-          </div>
+          <NavTypewriter/>
           <div style={{display:"flex",gap:16,alignItems:"center"}}>
             <button onClick={()=>setPrivacyOpen(true)} style={{background:"none",border:"none",color:"#888898",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>Privacy</button>
             <button onClick={onEnter} style={{padding:"8px 20px",background:"#C8FF57",border:"none",borderRadius:10,fontFamily:"inherit",fontWeight:700,fontSize:13,color:"#0C0C12",cursor:"pointer",transition:"all .2s"}}>Launch App →</button>
@@ -86,7 +115,6 @@ export default function Landing({ onEnter }) {
         {/* Hero */}
         <section style={{maxWidth:860,margin:"0 auto",padding:"96px 32px 80px",textAlign:"center"}}>
           <div className="fade-up d1" style={{display:"inline-flex",alignItems:"center",gap:8,background:"rgba(200,255,87,0.1)",border:"1px solid rgba(200,255,87,0.25)",borderRadius:20,padding:"6px 14px",marginBottom:28}}>
-            <span style={{width:6,height:6,borderRadius:"50%",background:"#C8FF57",display:"inline-block",animation:"pulse 2.4s ease-in-out infinite"}}/>
             <span style={{fontSize:12,color:"#C8FF57",fontFamily:"'DM Mono',monospace",letterSpacing:1}}>BETA — Free to use</span>
           </div>
           <h1 className="fade-up d2" style={{fontSize:"clamp(36px,7vw,72px)",fontWeight:800,lineHeight:1.1,letterSpacing:-2,margin:"0 0 24px",background:"linear-gradient(135deg,#EEEAE0 0%,#C8FF57 60%,#EEEAE0 100%)",backgroundSize:"200% auto",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text",animation:"shimmer 4s linear infinite"}}>
@@ -170,7 +198,7 @@ export default function Landing({ onEnter }) {
 
         {/* Footer */}
         <footer style={{borderTop:"1px solid rgba(255,255,255,0.06)",padding:"28px 32px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,maxWidth:960,margin:"0 auto"}}>
-          <span style={{fontSize:13,color:"#444454",fontFamily:"'DM Mono',monospace"}}>Show Me The Money · Beta</span>
+          <span style={{fontSize:13,color:"#444454",fontFamily:"'DM Mono',monospace"}}>$how Me The Money · Beta</span>
           <div style={{display:"flex",gap:20}}>
             <button onClick={()=>setPrivacyOpen(true)} style={{background:"none",border:"none",color:"#444454",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>Privacy</button>
             <button onClick={onEnter} style={{background:"none",border:"none",color:"#444454",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>Launch App</button>
