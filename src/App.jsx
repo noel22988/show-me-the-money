@@ -406,94 +406,125 @@ function RestoreModal({backup,onConfirm,onClose}){
 // ── AvatarCropModal ───────────────────────────────────────────────────────────
 function AvatarCropModal({src,onSave,onClose}){
   const T=useTheme();
-  const SIZE=280; // visible crop frame px
-  const [scale,setScale]=useState(1);
+  const SIZE=280;
+  // scale is a multiplier relative to the "fill" scale (1.0 = exactly fills frame)
+  // so minimum is always 1.0 (image covers frame), max is 3× that
+  const [fillScale,setFillScale]=useState(1); // scale that fills the frame
+  const [zoom,setZoom]=useState(1);           // 1.0 = fill, >1 = zoomed in
   const [offset,setOffset]=useState({x:0,y:0});
   const [dragging,setDragging]=useState(false);
   const [lastPos,setLastPos]=useState({x:0,y:0});
   const [lastPinchDist,setLastPinchDist]=useState(null);
   const [imgNatural,setImgNatural]=useState({w:1,h:1});
   const imgRef=useRef();
-  const MIN_SCALE=0.5; const MAX_SCALE=4;
+  const MAX_ZOOM=4;
 
-  // When image loads, initialise scale to fill the frame
+  // When image loads: compute the fill scale, set zoom=1, center offset
   const onImgLoad=()=>{
     const {naturalWidth:w,naturalHeight:h}=imgRef.current;
     setImgNatural({w,h});
-    const initScale=Math.max(SIZE/w,SIZE/h);
-    setScale(initScale);
+    const fs=Math.max(SIZE/w,SIZE/h);
+    setFillScale(fs);
+    setZoom(1);
     setOffset({x:0,y:0});
   };
 
-  // Clamp offset so the crop frame is always covered by the image
+  // Current pixel size of image
+  const scale=fillScale*zoom;
+  const iw=imgNatural.w*scale;
+  const ih=imgNatural.h*scale;
+
+  // Clamp offset: image must always cover the frame completely
   const clamp=(ox,oy,sc)=>{
-    const iw=imgNatural.w*sc; const ih=imgNatural.h*sc;
-    const maxX=Math.max(0,(iw-SIZE)/2); const maxY=Math.max(0,(ih-SIZE)/2);
-    return {x:Math.min(maxX,Math.max(-maxX,ox)),y:Math.min(maxY,Math.max(-maxY,oy))};
+    const w=imgNatural.w*sc; const h=imgNatural.h*sc;
+    // half-extents of how far image centre can move from frame centre
+    const hx=Math.max(0,(w-SIZE)/2); const hy=Math.max(0,(h-SIZE)/2);
+    return {x:Math.min(hx,Math.max(-hx,ox)), y:Math.min(hy,Math.max(-hy,oy))};
+  };
+
+  const applyZoom=nz=>{
+    const clamped=Math.min(MAX_ZOOM,Math.max(1,nz));
+    setZoom(clamped);
+    setOffset(o=>clamp(o.x,o.y,fillScale*clamped));
   };
 
   // ── Mouse drag ──────────────────────────────────────────────────────────────
   const onMouseDown=e=>{ e.preventDefault(); setDragging(true); setLastPos({x:e.clientX,y:e.clientY}); };
-  const onMouseMove=e=>{ if(!dragging) return; const dx=e.clientX-lastPos.x; const dy=e.clientY-lastPos.y; setOffset(o=>clamp(o.x+dx,o.y+dy,scale)); setLastPos({x:e.clientX,y:e.clientY}); };
+  const onMouseMove=e=>{
+    if(!dragging) return;
+    const dx=e.clientX-lastPos.x; const dy=e.clientY-lastPos.y;
+    setOffset(o=>clamp(o.x+dx,o.y+dy,scale));
+    setLastPos({x:e.clientX,y:e.clientY});
+  };
   const onMouseUp=()=>setDragging(false);
 
   // ── Touch drag + pinch ──────────────────────────────────────────────────────
   const onTouchStart=e=>{
     if(e.touches.length===1){ setDragging(true); setLastPos({x:e.touches[0].clientX,y:e.touches[0].clientY}); }
-    if(e.touches.length===2){ const dx=e.touches[0].clientX-e.touches[1].clientX; const dy=e.touches[0].clientY-e.touches[1].clientY; setLastPinchDist(Math.hypot(dx,dy)); }
+    if(e.touches.length===2){
+      const dx=e.touches[0].clientX-e.touches[1].clientX;
+      const dy=e.touches[0].clientY-e.touches[1].clientY;
+      setLastPinchDist(Math.hypot(dx,dy));
+    }
   };
   const onTouchMove=e=>{
     e.preventDefault();
     if(e.touches.length===1&&dragging){
       const dx=e.touches[0].clientX-lastPos.x; const dy=e.touches[0].clientY-lastPos.y;
-      setOffset(o=>clamp(o.x+dx,o.y+dy,scale)); setLastPos({x:e.touches[0].clientX,y:e.touches[0].clientY});
+      setOffset(o=>clamp(o.x+dx,o.y+dy,scale));
+      setLastPos({x:e.touches[0].clientX,y:e.touches[0].clientY});
     }
     if(e.touches.length===2&&lastPinchDist!==null){
-      const dx=e.touches[0].clientX-e.touches[1].clientX; const dy=e.touches[0].clientY-e.touches[1].clientY;
-      const dist=Math.hypot(dx,dy); const ratio=dist/lastPinchDist;
-      setScale(s=>{ const ns=Math.min(MAX_SCALE,Math.max(MIN_SCALE,s*ratio)); setOffset(o=>clamp(o.x,o.y,ns)); return ns; });
+      const dx=e.touches[0].clientX-e.touches[1].clientX;
+      const dy=e.touches[0].clientY-e.touches[1].clientY;
+      const dist=Math.hypot(dx,dy);
+      applyZoom(zoom*(dist/lastPinchDist));
       setLastPinchDist(dist);
     }
   };
   const onTouchEnd=()=>{ setDragging(false); setLastPinchDist(null); };
 
-  // ── Scroll to zoom on desktop ───────────────────────────────────────────────
-  const onWheel=e=>{ e.preventDefault(); setScale(s=>{ const ns=Math.min(MAX_SCALE,Math.max(MIN_SCALE,s*(1-e.deltaY*0.001))); setOffset(o=>clamp(o.x,o.y,ns)); return ns; }); };
+  // ── Scroll to zoom ──────────────────────────────────────────────────────────
+  const onWheel=e=>{ e.preventDefault(); applyZoom(zoom*(1-e.deltaY*0.002)); };
 
-  // ── Export crop ─────────────────────────────────────────────────────────────
+  // ── Export ──────────────────────────────────────────────────────────────────
   const saveCrop=()=>{
-    const canvas=document.createElement("canvas"); canvas.width=400; canvas.height=400;
+    const OUT=400;
+    const canvas=document.createElement("canvas"); canvas.width=OUT; canvas.height=OUT;
     const ctx=canvas.getContext("2d");
-    const iw=imgNatural.w*scale; const ih=imgNatural.h*scale;
-    // top-left of image in frame coords
-    const imgX=(SIZE/2)-iw/2+offset.x; const imgY=(SIZE/2)-ih/2+offset.y;
-    // what portion of the image falls inside the SIZE×SIZE frame, scaled to 400×400 output
-    const factor=400/SIZE;
-    ctx.drawImage(imgRef.current, -imgX/scale, -imgY/scale, SIZE/scale, SIZE/scale, 0, 0, 400, 400);
-    onSave(canvas.toDataURL("image/jpeg",0.9));
+    // In frame coords, image top-left is at:
+    const imgLeft=(SIZE/2)-(iw/2)+offset.x;
+    const imgTop=(SIZE/2)-(ih/2)+offset.y;
+    // Source region in natural image pixels that maps to the SIZE×SIZE frame:
+    const sx=-imgLeft/scale; const sy=-imgTop/scale;
+    const sw=SIZE/scale; const sh=SIZE/scale;
+    ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, OUT, OUT);
+    onSave(canvas.toDataURL("image/jpeg",0.92));
   };
 
-  const iw=imgNatural.w*scale; const ih=imgNatural.h*scale;
+  const sliderPct=Math.round((zoom-1)/(MAX_ZOOM-1)*100);
 
   return <Overlay onClose={onClose} zIndex={900}>
     <div style={{background:T.surface,borderRadius:20,padding:24,width:"100%",maxWidth:360,boxShadow:"0 24px 80px rgba(0,0,0,0.5)"}}>
       <p style={{margin:"0 0 4px",fontSize:18,fontWeight:700,color:T.textPrimary}}>Crop your photo</p>
       <p style={{margin:"0 0 16px",fontSize:13,color:T.textMuted}}>Drag to reposition · Scroll or pinch to zoom</p>
-      {/* Crop frame */}
-      <div style={{width:SIZE,height:SIZE,borderRadius:"50%",overflow:"hidden",margin:"0 auto 16px",cursor:dragging?"grabbing":"grab",position:"relative",boxShadow:`0 0 0 9999px ${T.bg}88,0 0 0 3px ${T.accent}`,userSelect:"none",touchAction:"none"}}
+      {/* Crop preview — circle clips the image */}
+      <div style={{width:SIZE,height:SIZE,borderRadius:"50%",overflow:"hidden",margin:"0 auto 16px",cursor:dragging?"grabbing":"grab",position:"relative",boxShadow:`0 0 0 9999px ${T.bg}99, 0 0 0 3px ${T.accent}`,userSelect:"none",touchAction:"none"}}
         onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
         onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
         onWheel={onWheel}>
         <img ref={imgRef} src={src} alt="" onLoad={onImgLoad}
-          style={{position:"absolute",width:iw,height:ih,left:`calc(50% - ${iw/2}px + ${offset.x}px)`,top:`calc(50% - ${ih/2}px + ${offset.y}px)`,pointerEvents:"none",userSelect:"none"}}/>
+          style={{position:"absolute",width:iw,height:ih,left:(SIZE/2)-(iw/2)+offset.x,top:(SIZE/2)-(ih/2)+offset.y,pointerEvents:"none",userSelect:"none",display:"block"}}/>
       </div>
-      {/* Zoom slider */}
+      {/* Zoom slider — 0% = fill, 100% = max zoom */}
       <div style={{marginBottom:18,padding:"0 4px"}}>
-        <input type="range" min={MIN_SCALE*100} max={MAX_SCALE*100} value={Math.round(scale*100)}
-          onChange={e=>{ const ns=parseInt(e.target.value)/100; setScale(ns); setOffset(o=>clamp(o.x,o.y,ns)); }}
+        <input type="range" min={0} max={100} value={sliderPct}
+          onChange={e=>applyZoom(1+(parseInt(e.target.value)/100)*(MAX_ZOOM-1))}
           style={{width:"100%",accentColor:T.accent}}/>
         <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:T.textMuted,marginTop:4}}>
-          <span>Zoom out</span><span>{Math.round(scale*100)}%</span><span>Zoom in</span>
+          <span>Fill</span>
+          <span style={{color:T.accent,fontFamily:"'DM Mono'",fontWeight:600}}>{zoom.toFixed(2)}×</span>
+          <span>4× zoom</span>
         </div>
       </div>
       <div style={{display:"flex",gap:10}}>
