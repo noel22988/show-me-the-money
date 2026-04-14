@@ -403,6 +403,107 @@ function RestoreModal({backup,onConfirm,onClose}){
   </ModalCard></Overlay>;
 }
 
+// ── AvatarCropModal ───────────────────────────────────────────────────────────
+function AvatarCropModal({src,onSave,onClose}){
+  const T=useTheme();
+  const SIZE=280; // visible crop frame px
+  const [scale,setScale]=useState(1);
+  const [offset,setOffset]=useState({x:0,y:0});
+  const [dragging,setDragging]=useState(false);
+  const [lastPos,setLastPos]=useState({x:0,y:0});
+  const [lastPinchDist,setLastPinchDist]=useState(null);
+  const [imgNatural,setImgNatural]=useState({w:1,h:1});
+  const imgRef=useRef();
+  const MIN_SCALE=0.5; const MAX_SCALE=4;
+
+  // When image loads, initialise scale to fill the frame
+  const onImgLoad=()=>{
+    const {naturalWidth:w,naturalHeight:h}=imgRef.current;
+    setImgNatural({w,h});
+    const initScale=Math.max(SIZE/w,SIZE/h);
+    setScale(initScale);
+    setOffset({x:0,y:0});
+  };
+
+  // Clamp offset so the crop frame is always covered by the image
+  const clamp=(ox,oy,sc)=>{
+    const iw=imgNatural.w*sc; const ih=imgNatural.h*sc;
+    const maxX=Math.max(0,(iw-SIZE)/2); const maxY=Math.max(0,(ih-SIZE)/2);
+    return {x:Math.min(maxX,Math.max(-maxX,ox)),y:Math.min(maxY,Math.max(-maxY,oy))};
+  };
+
+  // ── Mouse drag ──────────────────────────────────────────────────────────────
+  const onMouseDown=e=>{ e.preventDefault(); setDragging(true); setLastPos({x:e.clientX,y:e.clientY}); };
+  const onMouseMove=e=>{ if(!dragging) return; const dx=e.clientX-lastPos.x; const dy=e.clientY-lastPos.y; setOffset(o=>clamp(o.x+dx,o.y+dy,scale)); setLastPos({x:e.clientX,y:e.clientY}); };
+  const onMouseUp=()=>setDragging(false);
+
+  // ── Touch drag + pinch ──────────────────────────────────────────────────────
+  const onTouchStart=e=>{
+    if(e.touches.length===1){ setDragging(true); setLastPos({x:e.touches[0].clientX,y:e.touches[0].clientY}); }
+    if(e.touches.length===2){ const dx=e.touches[0].clientX-e.touches[1].clientX; const dy=e.touches[0].clientY-e.touches[1].clientY; setLastPinchDist(Math.hypot(dx,dy)); }
+  };
+  const onTouchMove=e=>{
+    e.preventDefault();
+    if(e.touches.length===1&&dragging){
+      const dx=e.touches[0].clientX-lastPos.x; const dy=e.touches[0].clientY-lastPos.y;
+      setOffset(o=>clamp(o.x+dx,o.y+dy,scale)); setLastPos({x:e.touches[0].clientX,y:e.touches[0].clientY});
+    }
+    if(e.touches.length===2&&lastPinchDist!==null){
+      const dx=e.touches[0].clientX-e.touches[1].clientX; const dy=e.touches[0].clientY-e.touches[1].clientY;
+      const dist=Math.hypot(dx,dy); const ratio=dist/lastPinchDist;
+      setScale(s=>{ const ns=Math.min(MAX_SCALE,Math.max(MIN_SCALE,s*ratio)); setOffset(o=>clamp(o.x,o.y,ns)); return ns; });
+      setLastPinchDist(dist);
+    }
+  };
+  const onTouchEnd=()=>{ setDragging(false); setLastPinchDist(null); };
+
+  // ── Scroll to zoom on desktop ───────────────────────────────────────────────
+  const onWheel=e=>{ e.preventDefault(); setScale(s=>{ const ns=Math.min(MAX_SCALE,Math.max(MIN_SCALE,s*(1-e.deltaY*0.001))); setOffset(o=>clamp(o.x,o.y,ns)); return ns; }); };
+
+  // ── Export crop ─────────────────────────────────────────────────────────────
+  const saveCrop=()=>{
+    const canvas=document.createElement("canvas"); canvas.width=400; canvas.height=400;
+    const ctx=canvas.getContext("2d");
+    const iw=imgNatural.w*scale; const ih=imgNatural.h*scale;
+    // top-left of image in frame coords
+    const imgX=(SIZE/2)-iw/2+offset.x; const imgY=(SIZE/2)-ih/2+offset.y;
+    // what portion of the image falls inside the SIZE×SIZE frame, scaled to 400×400 output
+    const factor=400/SIZE;
+    ctx.drawImage(imgRef.current, -imgX/scale, -imgY/scale, SIZE/scale, SIZE/scale, 0, 0, 400, 400);
+    onSave(canvas.toDataURL("image/jpeg",0.9));
+  };
+
+  const iw=imgNatural.w*scale; const ih=imgNatural.h*scale;
+
+  return <Overlay onClose={onClose} zIndex={900}>
+    <div style={{background:T.surface,borderRadius:20,padding:24,width:"100%",maxWidth:360,boxShadow:"0 24px 80px rgba(0,0,0,0.5)"}}>
+      <p style={{margin:"0 0 4px",fontSize:18,fontWeight:700,color:T.textPrimary}}>Crop your photo</p>
+      <p style={{margin:"0 0 16px",fontSize:13,color:T.textMuted}}>Drag to reposition · Scroll or pinch to zoom</p>
+      {/* Crop frame */}
+      <div style={{width:SIZE,height:SIZE,borderRadius:"50%",overflow:"hidden",margin:"0 auto 16px",cursor:dragging?"grabbing":"grab",position:"relative",boxShadow:`0 0 0 9999px ${T.bg}88,0 0 0 3px ${T.accent}`,userSelect:"none",touchAction:"none"}}
+        onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
+        onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
+        onWheel={onWheel}>
+        <img ref={imgRef} src={src} alt="" onLoad={onImgLoad}
+          style={{position:"absolute",width:iw,height:ih,left:`calc(50% - ${iw/2}px + ${offset.x}px)`,top:`calc(50% - ${ih/2}px + ${offset.y}px)`,pointerEvents:"none",userSelect:"none"}}/>
+      </div>
+      {/* Zoom slider */}
+      <div style={{marginBottom:18,padding:"0 4px"}}>
+        <input type="range" min={MIN_SCALE*100} max={MAX_SCALE*100} value={Math.round(scale*100)}
+          onChange={e=>{ const ns=parseInt(e.target.value)/100; setScale(ns); setOffset(o=>clamp(o.x,o.y,ns)); }}
+          style={{width:"100%",accentColor:T.accent}}/>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:T.textMuted,marginTop:4}}>
+          <span>Zoom out</span><span>{Math.round(scale*100)}%</span><span>Zoom in</span>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:10}}>
+        <Btn variant="ghost" onClick={onClose} style={{padding:"11px",fontSize:14}}>Cancel</Btn>
+        <Btn onClick={saveCrop} style={{padding:"11px",fontSize:14}}>Use Photo</Btn>
+      </div>
+    </div>
+  </Overlay>;
+}
+
 function ResetModal({onConfirm,onClose,onDownloadFirst}){
   const T=useTheme();
   return <Overlay onClose={onClose} zIndex={800}><ModalCard>
@@ -450,14 +551,15 @@ function Onboarding({onComplete}){
   const T=useTheme(); const inp=useInp(); const [step,setStep]=useState(0);
   const [p,setP]=useState({name:"",currency:"SGD",occupation:"",accentColor:"#C8FF57",bgColor:"#0C0C12",incomeStreams:[],fixedCommitments:[],startMonth:currentMonth()});
   const avatarRef=useRef();
+  const [cropSrc,setCropSrc]=useState(null);
   const handleAvatar=e=>{
     const f=e.target.files[0]; if(!f) return;
     const reader=new FileReader();
-    reader.onload=ev=>{ const img=new Image(); img.onload=()=>{ const c=document.createElement("canvas"); c.width=200; c.height=200; const ctx=c.getContext("2d"); const size=Math.min(img.width,img.height); ctx.drawImage(img,(img.width-size)/2,(img.height-size)/2,size,size,0,0,200,200); setP(v=>({...v,avatar:c.toDataURL("image/jpeg",0.85)})); }; img.src=ev.target.result; }; reader.readAsDataURL(f);
+    reader.onload=ev=>setCropSrc(ev.target.result);
+    reader.readAsDataURL(f);
   };
   const finish=()=>onComplete({...DEFAULT_PROFILE,...p,incomeStreams:(p.incomeStreams||[]).map(s=>({...s,defaultAmount:parseFloat(s.defaultAmount)||0})),fixedCommitments:[],onboarded:true});
   const updStream=(id,field,val)=>setP(v=>({...v,incomeStreams:v.incomeStreams.map(x=>x.id===id?{...x,[field]:val}:x)}));
-
   const steps=[
     // Step 0 — identity
     <div key="s0">
@@ -468,7 +570,7 @@ function Onboarding({onComplete}){
       </div>
       <div style={{display:"flex",justifyContent:"center",marginBottom:24}}>
         <div onClick={()=>avatarRef.current.click()} style={{width:80,height:80,borderRadius:"50%",background:T.accentMuted,border:`2px dashed ${T.accentBorder}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",overflow:"hidden"}}>
-          {p.avatar?<img src={p.avatar} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span style={{fontSize:32,color:T.accent,opacity:.7}}>+</span>}
+          {p.avatar?<img src={p.avatar} alt="" style={{width:80,height:80,objectFit:"cover",borderRadius:"50%",display:"block"}}/>:<span style={{fontSize:32,color:T.accent,opacity:.7}}>+</span>}
         </div>
         <input ref={avatarRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleAvatar}/>
       </div>
@@ -528,6 +630,7 @@ function Onboarding({onComplete}){
   ];
 
   return <div style={{minHeight:"100vh",background:T.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:"28px",fontFamily:"'DM Sans','Helvetica Neue',sans-serif"}}>
+    {cropSrc&&<AvatarCropModal src={cropSrc} onSave={data=>{setP(v=>({...v,avatar:data}));setCropSrc(null);}} onClose={()=>setCropSrc(null)}/>}
     <div style={{width:"100%",maxWidth:460}}>
       <div style={{display:"flex",gap:8,justifyContent:"center",marginBottom:36}}>
         {[0,1,2,3].map(i=><div key={i} style={{width:i===step?24:7,height:7,borderRadius:4,background:i===step?T.accent:i<step?T.accentBorder:T.border,transition:"all .3s"}}/>)}
@@ -1027,22 +1130,11 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     const restRef=useRef();
     useEffect(()=>setP(profile),[profile.name,profile.avatar]);
 
+    const [cropSrc,setCropSrc]=useState(null);
     const handleAv=e=>{
       const f=e.target.files[0]; if(!f) return;
       const r=new FileReader();
-      r.onload=ev=>{
-        const img=new Image();
-        img.onload=()=>{
-          const c=document.createElement("canvas");
-          c.width=200; c.height=200;
-          const ctx=c.getContext("2d");
-          const size=Math.min(img.width,img.height);
-          const sx=(img.width-size)/2; const sy=(img.height-size)/2;
-          ctx.drawImage(img,sx,sy,size,size,0,0,200,200);
-          setP(v=>({...v,avatar:c.toDataURL("image/jpeg",0.85)}));
-        };
-        img.src=ev.target.result;
-      };
+      r.onload=ev=>setCropSrc(ev.target.result);
       r.readAsDataURL(f);
     };
 
@@ -1102,7 +1194,8 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     </div>;
 
     return <div style={{display:"flex",flexDirection:"column",gap:16,paddingBottom:40}}>
-      {restCand&&<RestoreModal backup={restCand} onConfirm={()=>doRest(restCand)} onClose={()=>setRestCand(null)}/>}
+      {cropSrc&&<AvatarCropModal src={cropSrc} onSave={data=>{setP(v=>({...v,avatar:data}));setCropSrc(null);}} onClose={()=>setCropSrc(null)}/>}
+      {restCand&&<RestoreModal backup={restCand} onConfirm={()=>doRest(restCand)} onClose={()=>setRestCand(null)}/>}}
       {showRst&&<ResetModal onConfirm={doReset} onClose={()=>setShowRst(false)} onDownloadFirst={()=>{dlBackup(profile,monthlyData,eh,ch,insights,archive);showToast("Backup downloaded");}}/>}
       <input ref={restRef} type="file" accept=".json" style={{display:"none"}} onChange={handleRestFile}/>
 
@@ -1112,7 +1205,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         <div style={{display:"flex",alignItems:"center",gap:18,marginBottom:18}}>
           <div onClick={()=>avatarRef.current.click()} style={{width:72,height:72,borderRadius:"50%",background:T.accentMuted,border:`2px dashed ${T.accentBorder}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",overflow:"hidden",flexShrink:0,position:"relative"}}>
             {p.avatar
-              ?<img src={p.avatar} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+              ?<img src={p.avatar} alt="" style={{width:72,height:72,objectFit:"cover",borderRadius:"50%",display:"block"}}/>
               :<span style={{fontSize:28,color:T.accent}}>{p.name?p.name[0].toUpperCase():"+"}</span>}
             <div style={{position:"absolute",bottom:0,right:0,width:22,height:22,borderRadius:"50%",background:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:T.accentText}}>✎</div>
           </div>
