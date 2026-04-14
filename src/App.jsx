@@ -234,33 +234,6 @@ function MonthPicker({value,onChange,startMonth}){
   </div>;
 }
 
-// ── MonthPickerShort — same as MonthPicker but displays Apr 2026 format ───────
-function MonthPickerShort({value,onChange,startMonth}){
-  const T=useTheme(); const inp=useInp(); const [open,setOpen]=useState(false); const [typed,setTyped]=useState(value);
-  const btnRef=useRef(); const [pos,setPos]=useState({top:0,left:0,right:"auto"});
-  useEffect(()=>setTyped(value),[value]);
-  useEffect(()=>{
-    if(open&&btnRef.current){
-      const r=btnRef.current.getBoundingClientRect();
-      const dropW=200; const spaceRight=window.innerWidth-r.left;
-      if(spaceRight<dropW) setPos({top:r.bottom+6,left:"auto",right:window.innerWidth-r.right});
-      else setPos({top:r.bottom+6,left:r.left,right:"auto"});
-    }
-  },[open]);
-  const months=[]; const now=new Date();
-  for(let i=0;i<60;i++){ const d=new Date(now.getFullYear(),now.getMonth()-i+24,1); const m=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; months.push(m); }
-  return <div style={{position:"relative",display:"inline-block",width:"100%"}}>
-    <button ref={btnRef} onClick={()=>setOpen(o=>!o)} style={{width:"100%",padding:"9px 12px",background:T.surface2,border:`1px solid ${T.borderMid}`,borderRadius:10,color:value?T.textPrimary:T.textMuted,fontFamily:"'DM Mono'",fontSize:12,cursor:"pointer",whiteSpace:"nowrap",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-      <span>{value?monthLabelShort(value):"Any"}</span><span style={{fontSize:10,opacity:.6}}>▾</span>
-    </button>
-    {open&&<><div style={{position:"fixed",inset:0,zIndex:299}} onClick={()=>setOpen(false)}/>
-      <div style={{position:"fixed",top:pos.top,left:pos.left,right:pos.right,background:T.surface,border:`1px solid ${T.borderMid}`,borderRadius:14,zIndex:300,maxHeight:280,overflowY:"auto",minWidth:180,boxShadow:"0 16px 48px rgba(0,0,0,0.35)"}}>
-        <div style={{padding:"8px"}}><input value={typed} onChange={e=>setTyped(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&/^\d{4}-\d{2}$/.test(typed)){onChange(typed);setOpen(false);}}} placeholder="YYYY-MM" style={{...inp,fontSize:12,padding:"7px 10px"}}/></div>
-        <div onClick={()=>{onChange("");setOpen(false);}} style={{padding:"8px 14px",fontSize:12,color:!value?T.accent:T.textMuted,cursor:"pointer",fontFamily:"'DM Mono'",background:!value?T.accentMuted:"transparent"}}>Any</div>
-        {months.map(m=><div key={m} onClick={()=>{onChange(m);setOpen(false);}} style={{padding:"8px 14px",fontSize:12,color:m===value?T.accent:T.textSecondary,cursor:"pointer",fontFamily:"'DM Mono'",background:m===value?T.accentMuted:"transparent"}}>{monthLabelShort(m)}</div>)}
-      </div></>}
-  </div>;
-}
 function SixMonthChart({monthlyData,incomeStreams,selectedMonth,startMonth,compact}){
   const T=useTheme();
   const months=useMemo(()=>{ const r=[]; let m=selectedMonth; for(let i=0;i<6;i++){if(startMonth&&m<startMonth)break;r.unshift(m);m=prevMonth(m);} return r; },[selectedMonth,startMonth]);
@@ -735,9 +708,9 @@ function Onboarding({onComplete}){
             <input type="number" placeholder="Amt" value={c.amount||""} onChange={e=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.map(x=>x.id===c.id?{...x,amount:e.target.value}:x)}))} style={{...inp,textAlign:"right"}}/>
             <button onClick={()=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.filter(x=>x.id!==c.id)}))} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:20,padding:"0 6px"}}>×</button>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            <div><div style={{fontSize:11,color:T.textMuted,marginBottom:3}}>Start from</div><MonthPickerShort value={c.startFrom||""} onChange={v=>setP(x=>({...x,fixedCommitments:x.fixedCommitments.map(f=>f.id===c.id?{...f,startFrom:v}:f)}))}/></div>
-            <div><div style={{fontSize:11,color:T.textMuted,marginBottom:3}}>End month</div><MonthPickerShort value={c.endMonth||""} onChange={v=>setP(x=>({...x,fixedCommitments:x.fixedCommitments.map(f=>f.id===c.id?{...f,endMonth:v}:f)}))}/></div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            <div><div style={{fontSize:11,color:T.textMuted,marginBottom:3}}>Start from (blank = always)</div><MonthPicker value={c.startFrom||""} onChange={v=>setP(x=>({...x,fixedCommitments:x.fixedCommitments.map(f=>f.id===c.id?{...f,startFrom:v}:f)}))}/></div>
+            <div><div style={{fontSize:11,color:T.textMuted,marginBottom:3}}>End month (blank = ongoing)</div><MonthPicker value={c.endMonth||""} onChange={v=>setP(x=>({...x,fixedCommitments:x.fixedCommitments.map(f=>f.id===c.id?{...f,endMonth:v}:f)}))}/></div>
           </div>
         </div>)}
       </div>
@@ -1432,14 +1405,14 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
               <input type="number" placeholder="0" value={c.amount||""} onChange={e=>updF(c.id,"amount",parseFloat(e.target.value)||0)} style={{...inp2,textAlign:"right"}}/>
               <button onClick={()=>rmF(c.id)} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:20,padding:"0 6px",lineHeight:1}}>×</button>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
               <div>
-                <div style={{fontSize:11,color:T.textMuted,marginBottom:5}}>Start from</div>
-                <MonthPickerShort value={c.startFrom||""} onChange={v=>updF(c.id,"startFrom",v)}/>
+                <div style={{fontSize:11,color:T.textMuted,marginBottom:5}}>Start from (blank = always)</div>
+                <MonthPicker value={c.startFrom||""} onChange={v=>updF(c.id,"startFrom",v)}/>
               </div>
               <div>
-                <div style={{fontSize:11,color:T.textMuted,marginBottom:5}}>End month</div>
-                <MonthPickerShort value={c.endMonth||""} onChange={v=>updF(c.id,"endMonth",v)}/>
+                <div style={{fontSize:11,color:T.textMuted,marginBottom:5}}>End month (blank = ongoing)</div>
+                <MonthPicker value={c.endMonth||""} onChange={v=>updF(c.id,"endMonth",v)}/>
               </div>
             </div>
           </div>}
