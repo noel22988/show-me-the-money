@@ -637,7 +637,7 @@ function Onboarding({onComplete}){
               <div><div style={{fontSize:11,color:T.textMuted,marginBottom:4}}>Ends (optional)</div><input type="month" value={s.endMonth||""} onChange={e=>updStream(s.id,"endMonth",e.target.value)} style={inp}/></div>
             </div>
           </>}
-          {s.type==="variable"&&<div><div style={{fontSize:11,color:T.textMuted,marginBottom:4}}>Active from</div><input type="month" value={s.startFrom||""} onChange={e=>updStream(s.id,"startFrom",e.target.value)} style={inp}/></div>}
+          {s.type==="variable"&&<div><div style={{fontSize:11,color:T.textMuted,marginBottom:4}}
           {s.type==="oneoff"&&<div><div style={{fontSize:11,color:T.textMuted,marginBottom:4}}>For which month?</div><input type="month" value={s.startFrom||""} onChange={e=>updStream(s.id,"startFrom",e.target.value)} style={inp}/></div>}
         </div>)}
       </div>
