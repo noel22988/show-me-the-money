@@ -31,9 +31,127 @@ export function PrivacyModal({ onClose }) {
   );
 }
 
-// ── NavTypewriter — types $how Me / The Money on loop ────────────────────────
+// ── UIGallery — autoplay + tappable carousel of UI screens ───────────────────
+function UIGallery(){
+  const [active,setActive]=useState(0);
+  const timerRef=useRef(null);
+  const SLIDES=[
+    {
+      label:"Dashboard",
+      desc:"See your full month at a glance",
+      content:<>
+        <div style={{marginBottom:10,fontSize:12,color:"#888898",fontFamily:"'DM Mono',monospace"}}>April 2026</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+          {[["Income","S$6,200","#51CF66","+S$400 vs last mo"],["Fixed","S$1,800","#60AAFF","-S$0 vs last mo"],["Spent","S$2,100","#FF6B6B","-S$340 vs last mo"],["Saved","S$2,300","#C8FF57","+S$740 vs last mo"]].map(([l,v,c,d])=>(
+            <div key={l} style={{background:"rgba(255,255,255,0.05)",borderRadius:10,padding:"12px 10px",border:"1px solid rgba(255,255,255,0.07)"}}>
+              <div style={{fontSize:9,color:"#555568",letterSpacing:1,marginBottom:4,textTransform:"uppercase"}}>{l}</div>
+              <div style={{fontSize:16,fontWeight:700,color:c,fontFamily:"'DM Mono',monospace"}}>{v}</div>
+              <div style={{fontSize:9,color:c,fontFamily:"'DM Mono',monospace",marginTop:3,opacity:.7}}>{d}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{marginBottom:4,display:"flex",justifyContent:"space-between"}}><span style={{fontSize:11,color:"#888898"}}>Savings rate</span><span style={{fontSize:11,color:"#C8FF57",fontFamily:"'DM Mono',monospace",fontWeight:700}}>37.1%</span></div>
+        <div style={{height:5,background:"rgba(255,255,255,0.08)",borderRadius:5,overflow:"hidden"}}><div style={{height:"100%",width:"37%",background:"#C8FF57",borderRadius:5}}/></div>
+        <div style={{marginTop:8,fontSize:11,color:"#888898"}}>Top spend: <span style={{color:"#EEEAE0"}}>🍔 Food & Dining</span> · <span style={{color:"#C8FF57",fontFamily:"'DM Mono',monospace"}}>S$680</span></div>
+      </>
+    },
+    {
+      label:"Review",
+      desc:"Approve transactions before they're saved",
+      content:<>
+        <div style={{marginBottom:10,fontSize:12,color:"#888898"}}>3 transactions imported</div>
+        {[
+          {desc:"GRAB*RIDE",cat:"🚗 Transport",amt:"S$14.50",checked:true},
+          {desc:"FAIRPRICE XTRA",cat:"🛒 Groceries",amt:"S$67.80",checked:true},
+          {desc:"NETFLIX.COM",cat:"📱 Subscription",amt:"S$15.98",checked:false,flag:"usually excluded"},
+        ].map((t,i)=>(
+          <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+            <div style={{width:16,height:16,borderRadius:4,border:`2px solid ${t.checked?"#C8FF57":"rgba(255,255,255,0.2)"}`,background:t.checked?"#C8FF57":"transparent",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+              {t.checked&&<div style={{width:8,height:8,background:"#0C0C12",borderRadius:2}}/>}
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:12,color:"#EEEAE0",fontWeight:500}}>{t.desc}</div>
+              <div style={{fontSize:10,color:"#555568",marginTop:1}}>{t.cat}{t.flag&&<span style={{marginLeft:6,color:"#FAB005",fontSize:9,border:"1px solid rgba(250,176,5,0.3)",borderRadius:4,padding:"1px 5px"}}>{t.flag}</span>}</div>
+            </div>
+            <div style={{fontSize:12,fontFamily:"'DM Mono',monospace",color:t.checked?"#EEEAE0":"#555568"}}>{t.amt}</div>
+          </div>
+        ))}
+        <div style={{marginTop:12,padding:"10px 14px",background:"#C8FF57",borderRadius:10,textAlign:"center",fontSize:12,fontWeight:700,color:"#0C0C12"}}>Save 2 transactions → April 2026</div>
+      </>
+    },
+    {
+      label:"Breakdown",
+      desc:"Understand exactly where money goes",
+      content:<>
+        <div style={{marginBottom:10,fontSize:12,color:"#888898"}}>Variable spending · April 2026</div>
+        {[
+          {cat:"🍔 Food & Dining",amt:680,pct:32,col:"#FF6B6B",budget:800},
+          {cat:"🛒 Groceries",amt:420,pct:20,col:"#51CF66",budget:500},
+          {cat:"🚗 Transport",amt:210,pct:10,col:"#339AF0",budget:null},
+          {cat:"🎬 Entertainment",amt:180,pct:9,col:"#CC5DE8",budget:200},
+        ].map(({cat,amt,pct,col,budget})=>(
+          <div key={cat} style={{marginBottom:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+              <span style={{fontSize:12,color:"#EEEAE0"}}>{cat}</span>
+              <span style={{fontSize:11,fontFamily:"'DM Mono',monospace",color:col}}>S${amt}</span>
+            </div>
+            <div style={{height:4,background:"rgba(255,255,255,0.08)",borderRadius:4,overflow:"hidden"}}>
+              <div style={{height:"100%",width:`${pct*3}%`,background:col,borderRadius:4}}/>
+            </div>
+            {budget&&<div style={{fontSize:9,color:"#555568",marginTop:2,fontFamily:"'DM Mono',monospace"}}>S${amt} / S${budget} budget</div>}
+          </div>
+        ))}
+      </>
+    },
+    {
+      label:"Insights",
+      desc:"AI analysis of your spending patterns",
+      content:<>
+        <div style={{marginBottom:10,fontSize:12,color:"#888898"}}>Claude Insights · April 2026</div>
+        {[
+          {icon:"📉",text:"Your food spending dropped S$340 this month — your best result in 4 months."},
+          {icon:"⚠️",text:"Entertainment is at 90% of your S$200 budget with a week left."},
+          {icon:"💡",text:"You've saved consistently above 30% for 3 months. Well above the average of 20%."},
+          {icon:"🎯",text:"At your current rate you'll hit your Emergency Fund goal in 4 months."},
+        ].map(({icon,text},i)=>(
+          <div key={i} style={{display:"flex",gap:10,padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+            <span style={{fontSize:16,flexShrink:0}}>{icon}</span>
+            <span style={{fontSize:12,color:"#EEEAE0",lineHeight:1.5}}>{text}</span>
+          </div>
+        ))}
+      </>
+    },
+  ];
+
+  const restart=()=>{ clearTimeout(timerRef.current); timerRef.current=setTimeout(()=>setActive(a=>(a+1)%SLIDES.length),3500); };
+  useEffect(()=>{ timerRef.current=setTimeout(()=>setActive(a=>(a+1)%SLIDES.length),3500); return()=>clearTimeout(timerRef.current); },[]);
+  const go=i=>{ setActive(i); restart(); };
+
+  return <div style={{maxWidth:480,margin:"0 auto 96px",padding:"0 24px"}}>
+    <div style={{textAlign:"center",marginBottom:24}}>
+      <div style={{fontSize:11,letterSpacing:3,color:"#C8FF57",fontFamily:"'DM Mono',monospace",marginBottom:8,textTransform:"uppercase"}}>App Preview</div>
+      <div style={{fontSize:13,color:"#888898"}}>{SLIDES[active].desc}</div>
+    </div>
+    {/* Card */}
+    <div onClick={()=>go((active+1)%SLIDES.length)} style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:20,padding:"20px",cursor:"pointer",minHeight:280,transition:"border-color .2s",userSelect:"none"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <span style={{fontSize:13,fontWeight:700,color:"#EEEAE0"}}>{SLIDES[active].label}</span>
+        <span style={{fontSize:11,color:"#555568",fontFamily:"'DM Mono',monospace"}}>tap to advance →</span>
+      </div>
+      {SLIDES[active].content}
+    </div>
+    {/* Dots */}
+    <div style={{display:"flex",justifyContent:"center",gap:8,marginTop:16}}>
+      {SLIDES.map((_,i)=>(
+        <div key={i} onClick={()=>go(i)} style={{width:i===active?24:7,height:7,borderRadius:4,background:i===active?"#C8FF57":"rgba(255,255,255,0.15)",transition:"all .3s",cursor:"pointer"}}/>
+      ))}
+    </div>
+  </div>;
+}
+
+// ── NavTypewriter — types Show Me / The Money on loop ────────────────────────
 function NavTypewriter(){
-  const LINES=["$how Me","The Money"];
+  const LINES=["Show Me","The Money"];
   const full=LINES[0]+"||"+LINES[1];
   const [typed,setTyped]=useState("");
   const timerRef=useRef(null);
@@ -133,18 +251,8 @@ export default function Landing({ onEnter }) {
           </div>
         </section>
 
-        {/* Mock UI strip */}
-        <div className="fade-up d5" style={{maxWidth:720,margin:"0 auto 96px",padding:"0 32px"}}>
-          <div className="mock-grid" style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:20,padding:"24px",display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
-            {[["Income","S$6,200","#51CF66"],["Fixed","S$1,800","#60AAFF"],["Spent","S$2,100","#FF6B6B"],["Saved","S$2,300","#C8FF57"]].map(([label,val,col])=>(
-              <div key={label} style={{background:"rgba(255,255,255,0.04)",borderRadius:12,padding:"16px 14px",border:"1px solid rgba(255,255,255,0.06)"}}>
-                <div style={{fontSize:10,color:"#555568",letterSpacing:1,marginBottom:6,textTransform:"uppercase"}}>{label}</div>
-                <div style={{fontSize:18,fontWeight:700,color:col,fontFamily:"'DM Mono',monospace"}}>{val}</div>
-              </div>
-            ))}
-          </div>
-          <div style={{textAlign:"center",marginTop:12,fontSize:12,color:"#444454",fontFamily:"'DM Mono',monospace"}}>← your dashboard looks like this</div>
-        </div>
+        {/* UI Gallery */}
+        <UIGallery/>
 
         {/* Features */}
         <section style={{maxWidth:960,margin:"0 auto 96px",padding:"0 32px"}}>
@@ -198,7 +306,7 @@ export default function Landing({ onEnter }) {
 
         {/* Footer */}
         <footer style={{borderTop:"1px solid rgba(255,255,255,0.06)",padding:"28px 32px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,maxWidth:960,margin:"0 auto"}}>
-          <span style={{fontSize:13,color:"#444454",fontFamily:"'DM Mono',monospace"}}>$how Me The Money · Beta</span>
+          <span style={{fontSize:13,color:"#444454",fontFamily:"'DM Mono',monospace"}}>Show Me The Money · Beta</span>
           <div style={{display:"flex",gap:20}}>
             <button onClick={()=>setPrivacyOpen(true)} style={{background:"none",border:"none",color:"#444454",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>Privacy</button>
             <button onClick={onEnter} style={{background:"none",border:"none",color:"#444454",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>Launch App</button>
