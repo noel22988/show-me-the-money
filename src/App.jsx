@@ -636,7 +636,7 @@ function Onboarding({onComplete}){
     const reader=new FileReader();
     reader.onload=ev=>setCropSrc(ev.target.result);
     reader.readAsDataURL(f);
-  };
+  ;
   const finish=()=>onComplete({...DEFAULT_PROFILE,...p,incomeStreams:(p.incomeStreams||[]).map(s=>({...s,defaultAmount:parseFloat(s.defaultAmount)||0})),fixedCommitments:(p.fixedCommitments||[]).map(c=>({...c,amount:parseFloat(c.amount)||0,startFrom:c.startFrom||"",endMonth:c.endMonth||""})),onboarded:true});
   const updStream=(id,field,val)=>setP(v=>({...v,incomeStreams:v.incomeStreams.map(x=>x.id===id?{...x,[field]:val}:x)}));
   const steps=[
