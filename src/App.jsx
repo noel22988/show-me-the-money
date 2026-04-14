@@ -630,10 +630,18 @@ function Onboarding({onComplete}){
           <div style={{display:"flex",borderRadius:9,overflow:"hidden",border:`1px solid ${T.border}`,marginBottom:10}}>
             {["fixed","variable","oneoff"].map(t=><button key={t} onClick={()=>updStream(s.id,"type",t)} style={{flex:1,padding:"8px 6px",background:s.type===t?T.accent:"transparent",border:"none",color:s.type===t?T.accentText:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:s.type===t?700:400}}>{t==="oneoff"?"One-off":t.charAt(0).toUpperCase()+t.slice(1)}</button>)}
           </div>
-          {s.type==="fixed"&&<input type="number" placeholder="Monthly amount" value={s.defaultAmount} onChange={e=>updStream(s.id,"defaultAmount",e.target.value)} style={inp}/>}
+          {s.type==="fixed"&&<>
+            <input type="number" placeholder="Monthly amount" value={s.defaultAmount||""} onChange={e=>updStream(s.id,"defaultAmount",e.target.value)} style={{...inp,marginBottom:10}}/>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <div><div style={{fontSize:11,color:T.textMuted,marginBottom:4}}>Active from</div><input type="month" value={s.startFrom||""} onChange={e=>updStream(s.id,"startFrom",e.target.value)} style={inp}/></div>
+              <div><div style={{fontSize:11,color:T.textMuted,marginBottom:4}}>Ends (optional)</div><input type="month" value={s.endMonth||""} onChange={e=>updStream(s.id,"endMonth",e.target.value)} style={inp}/></div>
+            </div>
+          </>}
+          {s.type==="variable"&&<div><div style={{fontSize:11,color:T.textMuted,marginBottom:4}}>Active from</div><input type="month" value={s.startFrom||""} onChange={e=>updStream(s.id,"startFrom",e.target.value)} style={inp}/></div>}
+          {s.type==="oneoff"&&<div><div style={{fontSize:11,color:T.textMuted,marginBottom:4}}>For which month?</div><input type="month" value={s.startFrom||""} onChange={e=>updStream(s.id,"startFrom",e.target.value)} style={inp}/></div>}
         </div>)}
       </div>
-      <button onClick={()=>setP(v=>({...v,incomeStreams:[...v.incomeStreams,{id:`s${Date.now()}`,name:"",type:"fixed",defaultAmount:"",active:true}]}))} style={{padding:"10px",background:"transparent",border:`1px dashed ${T.borderMid}`,borderRadius:10,color:T.textMuted,fontFamily:"inherit",fontSize:14,cursor:"pointer",width:"100%",marginBottom:18}}>+ Add income stream</button>
+      <button onClick={()=>setP(v=>({...v,incomeStreams:[...v.incomeStreams,{id:`s${Date.now()}`,name:"",type:"fixed",defaultAmount:"",active:true,startFrom:"",endMonth:""}]}))} style={{padding:"10px",background:"transparent",border:`1px dashed ${T.borderMid}`,borderRadius:10,color:T.textMuted,fontFamily:"inherit",fontSize:14,cursor:"pointer",width:"100%",marginBottom:18}}>+ Add income stream</button>
       <Btn onClick={()=>setStep(2)}>Continue →</Btn>
       <Btn variant="ghost" onClick={()=>setStep(2)} style={{marginTop:10}}>Skip for now</Btn>
     </div>,
