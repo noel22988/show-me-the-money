@@ -709,8 +709,8 @@ function Onboarding({onComplete}){
             <button onClick={()=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.filter(x=>x.id!==c.id)}))} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:20,padding:"0 6px"}}>×</button>
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            <div><div style={{fontSize:11,color:T.textMuted,marginBottom:3}}>Start from (blank = always)</div><MonthPicker value={c.startFrom||""} onChange={v=>setP(x=>({...x,fixedCommitments:x.fixedCommitments.map(f=>f.id===c.id?{...f,startFrom:v}:f)}))}/></div>
-            <div><div style={{fontSize:11,color:T.textMuted,marginBottom:3}}>End month (blank = ongoing)</div><MonthPicker value={c.endMonth||""} onChange={v=>setP(x=>({...x,fixedCommitments:x.fixedCommitments.map(f=>f.id===c.id?{...f,endMonth:v}:f)}))}/></div>
+            <div><div style={{fontSize:11,color:T.textMuted,marginBottom:3}}>Start from (blank = always)</div><input type="month" value={c.startFrom||""} onChange={e=>setP(x=>({...x,fixedCommitments:x.fixedCommitments.map(f=>f.id===c.id?{...f,startFrom:e.target.value}:f)}))} style={inp}/></div>
+            <div><div style={{fontSize:11,color:T.textMuted,marginBottom:3}}>End month (blank = ongoing)</div><input type="month" value={c.endMonth||""} onChange={e=>setP(x=>({...x,fixedCommitments:x.fixedCommitments.map(f=>f.id===c.id?{...f,endMonth:e.target.value}:f)}))} style={inp}/></div>
           </div>
         </div>)}
       </div>
@@ -1408,11 +1408,11 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
               <div>
                 <div style={{fontSize:11,color:T.textMuted,marginBottom:5}}>Start from (blank = always)</div>
-                <MonthPicker value={c.startFrom||""} onChange={v=>updF(c.id,"startFrom",v)}/>
+                <input type="month" value={c.startFrom||""} onChange={e=>updF(c.id,"startFrom",e.target.value)} style={inp2}/>
               </div>
               <div>
                 <div style={{fontSize:11,color:T.textMuted,marginBottom:5}}>End month (blank = ongoing)</div>
-                <MonthPicker value={c.endMonth||""} onChange={v=>updF(c.id,"endMonth",v)}/>
+                <input type="month" value={c.endMonth||""} onChange={e=>updF(c.id,"endMonth",e.target.value)} style={inp2}/>
               </div>
             </div>
           </div>}
