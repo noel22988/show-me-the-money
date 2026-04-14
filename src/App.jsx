@@ -184,13 +184,105 @@ function Btn({children,onClick,disabled,variant="accent",size="md",style}){
 function Check({checked,onChange}){ const T=useTheme(); return <div onClick={onChange} style={{width:22,height:22,borderRadius:7,border:`1.5px solid ${checked?T.accent:T.borderMid}`,background:checked?T.accentMuted:"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,transition:"all .15s"}}>{checked&&<svg width="12" height="10" viewBox="0 0 12 10" fill="none"><path d="M1 5L4.5 8.5L11 1" stroke={T.accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}</div>; }
 function Toast({msg,onDone}){ const T=useTheme(); useEffect(()=>{const t=setTimeout(onDone,2800);return()=>clearTimeout(t);},[onDone]); return <div style={{position:"fixed",bottom:96,left:"50%",transform:"translateX(-50%)",background:T.accent,color:T.accentText,borderRadius:24,padding:"10px 26px",fontSize:14,fontWeight:600,zIndex:2999,whiteSpace:"nowrap",pointerEvents:"none",boxShadow:"0 4px 24px rgba(0,0,0,0.25)"}}>{msg}</div>; }
 
-// ── PulseDot — breathing accent dot for logo ──────────────────────────────────
-function PulseDot({size=7,style}){
+// ── LogoAnimation — typewriter logo ↔ "you've saved X since we started" ───────
+function LogoAnimation({allTimeSaved,fmt,compact}){
   const T=useTheme();
-  return <>
-    <style>{`@keyframes smtm-pulse{0%,100%{opacity:.35;transform:scale(1)}50%{opacity:1;transform:scale(1.25)}}`}</style>
-    <div style={{width:size,height:size,borderRadius:"50%",background:T.accent,animation:"smtm-pulse 2.4s ease-in-out infinite",...style}}/>
-  </>;
+  // phases: "typing-show" → "typing-money" → "hold-logo" → "fade-out-logo" → "counting" → "hold-number" → "fade-out-number" → repeat
+  const LOGO_LINE1="Show Me";
+  const LOGO_LINE2=compact?"The Money":" The Money";
+  const FULL_LOGO=compact?"Show Me The Money":null;
+  const hasData=allTimeSaved>0;
+  const [phase,setPhase]=useState("typing");
+  const [typed,setTyped]=useState("");
+  const [countVal,setCountVal]=useState(0);
+  const [opacity,setOpacity]=useState(1);
+  const rafRef=useRef(null); const timerRef=useRef(null);
+
+  const fullText=compact?FULL_LOGO:(LOGO_LINE1+"||"+LOGO_LINE2);
+
+  const runTypewriter=useCallback((text,onDone,speed=38)=>{
+    let i=0;
+    const tick=()=>{ i++; setTyped(text.slice(0,i)); if(i<text.length) timerRef.current=setTimeout(tick,speed); else onDone(); };
+    timerRef.current=setTimeout(tick,speed);
+  },[]);
+
+  const runCountUp=(target,onDone,duration=800)=>{
+    const start=performance.now();
+    const tick=now=>{
+      const p=Math.min((now-start)/duration,1);
+      const eased=1-Math.pow(1-p,3);
+      setCountVal(target*eased);
+      if(p<1) rafRef.current=requestAnimationFrame(tick); else{ setCountVal(target); onDone(); }
+    };
+    rafRef.current=requestAnimationFrame(tick);
+  };
+
+  useEffect(()=>{
+    let cancelled=false;
+    const cleanup=()=>{ cancelled=true; clearTimeout(timerRef.current); cancelAnimationFrame(rafRef.current); };
+
+    const cycle=()=>{
+      if(cancelled) return;
+      // Phase 1: type logo
+      setPhase("logo"); setTyped(""); setOpacity(1);
+      runTypewriter(fullText,()=>{
+        if(cancelled) return;
+        // Phase 2: hold logo
+        timerRef.current=setTimeout(()=>{
+          if(cancelled) return;
+          if(!hasData){
+            // no data — just fade and retype
+            setOpacity(0);
+            timerRef.current=setTimeout(()=>{ if(!cancelled) cycle(); },400);
+            return;
+          }
+          // Phase 3: fade out logo
+          setOpacity(0);
+          timerRef.current=setTimeout(()=>{
+            if(cancelled) return;
+            // Phase 4: count up number
+            setPhase("number"); setOpacity(1); setCountVal(0);
+            runCountUp(allTimeSaved,()=>{
+              if(cancelled) return;
+              // Phase 5: hold number
+              timerRef.current=setTimeout(()=>{
+                if(cancelled) return;
+                // Phase 6: fade out number
+                setOpacity(0);
+                timerRef.current=setTimeout(()=>{ if(!cancelled) cycle(); },400);
+              },2200);
+            });
+          },350);
+        },2000);
+      });
+    };
+    cycle();
+    return cleanup;
+  },[allTimeSaved,hasData,fullText]);
+
+  const sym=CURRENCY_SYMBOLS[T.bgLight?"SGD":"SGD"];
+
+  if(phase==="logo"){
+    const parts=typed.split("||");
+    return <div style={{opacity,transition:"opacity 0.35s ease",minHeight:compact?20:38}}>
+      {compact
+        ?<div style={{fontSize:14,fontWeight:800,color:T.accent,letterSpacing:-0.3,fontFamily:"inherit"}}>{typed}<span style={{opacity:0.4,animation:"blink .7s step-end infinite"}}>|</span></div>
+        :<>
+          <div style={{fontSize:15,fontWeight:800,color:T.accent,letterSpacing:-0.3,lineHeight:1.2}}>{parts[0]||""}</div>
+          <div style={{fontSize:15,fontWeight:800,color:T.accent,letterSpacing:-0.3,lineHeight:1.2}}>{parts[1]||""}<span style={{opacity:0.4,animation:"blink .7s step-end infinite"}}>|</span></div>
+        </>}
+      <style>{`@keyframes blink{0%,100%{opacity:.4}50%{opacity:0}}`}</style>
+    </div>;
+  }
+
+  // number phase
+  const absVal=Math.abs(countVal);
+  const formatted=CURRENCY_SYMBOLS["SGD"]+absVal.toLocaleString("en-SG",{minimumFractionDigits:2,maximumFractionDigits:2});
+  return <div style={{opacity,transition:"opacity 0.35s ease",minHeight:compact?20:38}}>
+    <div style={{fontSize:compact?12:13,color:T.textSecondary,lineHeight:1.5,fontFamily:"inherit",fontWeight:400}}>
+      you've saved <span style={{color:T.accent,fontWeight:700,fontFamily:"'DM Mono'"}}>{formatted}</span> since we started
+    </div>
+  </div>;
 }
 
 // ── CountUp — animates a number from 0 to target on mount/change ──────────────
@@ -843,6 +935,12 @@ export default function App(){
   const avgSpend=useMemo(()=>{ const months=Object.entries(monthlyData).filter(([m])=>(!profile?.startMonth||m>=profile.startMonth)&&m!==selectedMonth); if(!months.length) return null; return months.reduce((s,[,md])=>s+(md.txs||[]).reduce((a,t)=>a+t.amount,0),0)/months.length; },[monthlyData,selectedMonth,profile?.startMonth]);
   const fullMonths=useMemo(()=>Object.entries(monthlyData).filter(([m,md])=>{ if(profile?.startMonth&&m<profile.startMonth) return false; return (md.txs||[]).length>0&&totalIncome(streams,md.incomeOverrides||{},m)>0; }).length,[monthlyData,streams,profile?.startMonth]);
   const checkedCount=pendingTxs.filter(t=>t.checked).length;
+  const allTimeSaved=useMemo(()=>Object.entries(monthlyData).filter(([m])=>!profile?.startMonth||m>=profile.startMonth).reduce((total,[m,md])=>{
+    const inc=totalIncome(streams,md.incomeOverrides||{},m);
+    const spent=(md.txs||[]).reduce((s,t)=>s+t.amount,0);
+    const fix=(md.fixedOverrides||profile?.fixedCommitments||[]).filter(c=>(!c.startFrom||m>=c.startFrom)&&(!c.endMonth||m<=c.endMonth)).reduce((s,c)=>s+(+c.amount||0),0);
+    return total+(inc-spent-fix);
+  },0),[monthlyData,streams,profile]);
   const nudge=useMemo(()=>{
     if(pendingTxs.length>0) return {color:T.warning,title:`${pendingTxs.length} transactions waiting for review`,sub:"Tap to approve",tab:"review"};
     if(pendingVars.length>0) return {color:T.warning,title:"Variable income needs entry",sub:"Tap Add to enter amounts",tab:"add"};
@@ -1634,9 +1732,8 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       {isDesktop&&<div style={{width:SIDEBAR_W,background:T.surface,borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"28px 14px",position:"fixed",top:0,left:0,bottom:0,zIndex:50,boxShadow:`4px 0 24px rgba(0,0,0,${T.bgLight?0.05:0.18})`}}>
         {/* Brand + avatar */}
         <div style={{marginBottom:24,padding:"0 6px"}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
-            <div style={{fontSize:15,fontWeight:800,color:T.accent,letterSpacing:-0.3,lineHeight:1.2}}>Show Me<br/>The Money</div>
-            <PulseDot size={7} style={{marginTop:2,flexShrink:0}}/>
+          <div style={{marginBottom:14,minHeight:42}}>
+            <LogoAnimation allTimeSaved={allTimeSaved} fmt={fmt} compact={false}/>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12}}>
             {profile.avatar
@@ -1699,9 +1796,8 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
             {profile.avatar
               ?<img src={profile.avatar} alt="" style={{width:32,height:32,borderRadius:"50%",objectFit:"cover"}}/>
               :<div style={{width:32,height:32,borderRadius:"50%",background:T.accentMuted,border:`1px solid ${T.accentBorder}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,color:T.accent,fontWeight:700}}>{profile.name?profile.name[0].toUpperCase():"?"}</div>}
-            <div style={{display:"flex",alignItems:"center",gap:7}}>
-              <div style={{fontSize:14,fontWeight:800,color:T.accent,letterSpacing:-0.3}}>Show Me The Money</div>
-              <PulseDot size={6}/>
+            <div style={{flex:1,minWidth:0}}>
+              <LogoAnimation allTimeSaved={allTimeSaved} fmt={fmt} compact={true}/>
             </div>
           </div>
           <MonthPicker value={selectedMonth} onChange={setSelectedMonth} startMonth={profile.startMonth}/>
