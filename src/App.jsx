@@ -1560,6 +1560,14 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
             <span style={{fontSize:18}}>🔐</span>
             <div><div style={{fontWeight:500}}>Change / Remove PIN</div><div style={{fontSize:12,color:T.textMuted,marginTop:2}}>You'll be taken to PIN setup on next open</div></div>
           </button>
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={()=>setShowPrivacy(true)} style={{flex:1,padding:"13px 16px",background:"transparent",border:`1px solid ${T.border}`,borderRadius:11,color:T.textSecondary,fontFamily:"inherit",fontSize:14,cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:18}}>🔒</span><span style={{fontWeight:500}}>Privacy Policy</span>
+            </button>
+            <a href="/landing" style={{flex:1,padding:"13px 16px",background:"transparent",border:`1px solid ${T.border}`,borderRadius:11,color:T.textSecondary,fontFamily:"inherit",fontSize:14,cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:10,textDecoration:"none"}}>
+              <span style={{fontSize:18}}>🏠</span><span style={{fontWeight:500}}>About</span>
+            </a>
+          </div>
           {(()=>{
             const ab=lsLoad("autoBackups")||[];
             if(!ab.length) return null;
@@ -1680,7 +1688,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         {/* Sidebar footer links */}
         <div style={{display:"flex",gap:14,padding:"14px 6px 0",borderTop:`1px solid ${T.border}`,marginTop:12}}>
           <button onClick={()=>setShowPrivacy(true)} style={{background:"none",border:"none",color:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit",padding:0}}>🔒 Privacy</button>
-          <button onClick={()=>{localStorage.removeItem("smtm_entered");window.location.reload();}} style={{background:"none",border:"none",color:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit",padding:0}}>← Home</button>
+          <a href="/landing" style={{background:"none",border:"none",color:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit",padding:0,textDecoration:"none"}}>About</a>
         </div>
       </div>}
 
