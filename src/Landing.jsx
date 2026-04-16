@@ -200,7 +200,7 @@ function UIGallery(){
       <div style={{fontSize:11,letterSpacing:3,color:"#C8FF57",fontFamily:"'DM Mono',monospace",marginBottom:6,textTransform:"uppercase"}}>App Preview</div>
       <div style={{fontSize:13,color:"#888898",minHeight:20,transition:"opacity .2s",opacity:fading?0:1}}>{SLIDES[active].desc}</div>
     </div>
-    <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:20,padding:"20px",minHeight:320,transition:"opacity .26s ease",opacity:fading?0:1}}>
+    <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:20,padding:"20px",transition:"opacity .26s ease",opacity:fading?0:1}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
         <span style={{fontSize:13,fontWeight:700,color:"#EEEAE0"}}>{SLIDES[active].label}</span>
         <div style={{display:"flex",gap:6}}>
@@ -210,7 +210,7 @@ function UIGallery(){
       </div>
       {SLIDES[active].content}
     </div>
-    <div style={{display:"flex",justifyContent:"center",gap:7,marginTop:14}}>
+    <div style={{display:"flex",justifyContent:"center",gap:7,marginTop:10}}>
       {SLIDES.map((_,i)=>(
         <div key={i} onClick={()=>go(i)} style={{width:i===active?22:6,height:6,borderRadius:3,background:i===active?"#C8FF57":"rgba(255,255,255,0.15)",transition:"all .3s",cursor:"pointer"}}/>
       ))}
@@ -308,7 +308,7 @@ export default function Landing({onEnter}){
     {q:"Is my financial data safe?",a:"Yes. All data is stored locally in your browser. When you import a statement, it's sent to Claude for parsing only — not stored. See our privacy policy for details."},
     {q:"What if I clear my browser?",a:"Your data will be lost — the trade-off of local-first storage. We strongly recommend downloading a backup regularly from Profile → Data & Backup."},
     {q:"What's the founding member price?",a:"We haven't set it yet — that's partly up to you. The first 200 on the waitlist get the best price we offer, locked in for life."},
-    {q:"When does it launch publicly?",a:"We're in private beta now. Public launch is tied to hitting 200 waitlist signups. The closer we get, the sooner it happens."},
+    {q:"When does it launch publicly?",a:"We're currently in early access. Public launch is tied to hitting 200 waitlist signups. The closer we get, the sooner it happens."},
   ];
 
   return <>
@@ -332,42 +332,34 @@ export default function Landing({onEnter}){
         <NavTypewriter/>
         <div style={{display:"flex",gap:12,alignItems:"center"}}>
           <button onClick={()=>setPrivacyOpen(true)} style={{background:"none",border:"none",color:"#888898",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>Privacy</button>
-          <button onClick={onEnter} style={{padding:"8px 16px",background:"transparent",border:"1px solid rgba(255,255,255,0.18)",borderRadius:10,fontFamily:"inherit",fontWeight:600,fontSize:13,color:"#EEEAE0",cursor:"pointer"}}>Beta →</button>
         </div>
       </nav>
 
-      {/* Hero: badge → gallery → headline → waitlist */}
-      <section style={{maxWidth:600,margin:"0 auto",padding:"52px 28px 0",textAlign:"center"}}>
-        <div className="fu d1" style={{display:"inline-flex",alignItems:"center",gap:8,background:"rgba(200,255,87,0.08)",border:"1px solid rgba(200,255,87,0.2)",borderRadius:20,padding:"6px 16px",marginBottom:28}}>
+      {/* Hero: badge → headline → gallery → waitlist */}
+      <section style={{maxWidth:640,margin:"0 auto",padding:"28px 28px 0",textAlign:"center"}}>
+        <div style={{display:"inline-flex",alignItems:"center",gap:8,background:"rgba(200,255,87,0.08)",border:"1px solid rgba(200,255,87,0.2)",borderRadius:20,padding:"6px 16px",marginBottom:10}}>
           <span style={{width:6,height:6,borderRadius:"50%",background:"#C8FF57",display:"inline-block"}}/>
-          <span style={{fontSize:12,color:"#C8FF57",fontFamily:"'DM Mono',monospace",letterSpacing:1}}>PRIVATE BETA · Waitlist open</span>
+          <span style={{fontSize:12,color:"#C8FF57",fontFamily:"'DM Mono',monospace",letterSpacing:1}}>Waitlist open</span>
         </div>
-      </section>
-
-      {/* Gallery — first visual thing */}
-      <div className="fu d2" style={{marginBottom:52}}><UIGallery/></div>
-
-      {/* Headline + subtext */}
-      <section style={{maxWidth:640,margin:"0 auto",padding:"0 28px 56px",textAlign:"center"}}>
-        <h1 className="fu d3" style={{fontSize:"clamp(30px,6vw,58px)",fontWeight:800,lineHeight:1.1,letterSpacing:-2,margin:"0 0 20px",background:"linear-gradient(135deg,#EEEAE0 0%,#C8FF57 55%,#EEEAE0 100%)",backgroundSize:"200% auto",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text",animation:"shimmer 4s linear infinite"}}>
+        <h1 style={{fontSize:"clamp(30px,6vw,58px)",fontWeight:800,lineHeight:1.1,letterSpacing:-2,margin:"0 0 16px",background:"linear-gradient(135deg,#EEEAE0 0%,#C8FF57 55%,#EEEAE0 100%)",backgroundSize:"200% auto",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text",animation:"shimmer 4s linear infinite"}}>
           Your bank statement,<br/>parsed by AI,<br/>stored by nobody
         </h1>
-        <p className="fu d4" style={{fontSize:"clamp(14px,2vw,17px)",color:"#888898",lineHeight:1.75,maxWidth:500,margin:"0 auto 36px"}}>
+        <p style={{fontSize:"clamp(14px,2vw,17px)",color:"#888898",lineHeight:1.75,maxWidth:500,margin:"0 auto 24px"}}>
           Upload your statement. Claude reads every transaction. You get a clear picture of your money — with zero data leaving your device.
         </p>
+      </section>
 
-        {/* Waitlist form */}
-        <div className="fu d5" style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:20,padding:"26px",marginBottom:18,textAlign:"left"}}>
+      {/* Gallery */}
+      <div style={{marginBottom:16}}><UIGallery/></div>
+
+      {/* Waitlist */}
+      <section style={{maxWidth:640,margin:"0 auto",padding:"0 28px 32px",textAlign:"center"}}>
+        <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:20,padding:"26px",marginBottom:18,textAlign:"left"}}>
           <div style={{marginBottom:16}}>
             <div style={{fontSize:15,fontWeight:700,color:"#EEEAE0",marginBottom:5}}>Get founding member pricing</div>
             <div style={{fontSize:13,color:"#888898",lineHeight:1.65}}>First 200 on the waitlist lock in a special price when paid features launch.</div>
           </div>
           <WaitlistForm/>
-        </div>
-
-        <div className="fu d6" style={{fontSize:13,color:"#555568"}}>
-          Already in beta?{" "}
-          <button onClick={onEnter} style={{background:"none",border:"none",color:"#888898",cursor:"pointer",fontFamily:"inherit",fontSize:13,textDecoration:"underline",textUnderlineOffset:3}}>Open the app →</button>
         </div>
       </section>
 
@@ -454,10 +446,9 @@ export default function Landing({onEnter}){
 
       {/* Footer */}
       <footer style={{borderTop:"1px solid rgba(255,255,255,0.06)",padding:"22px 28px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,maxWidth:940,margin:"0 auto"}}>
-        <span style={{fontSize:12,color:"#444454",fontFamily:"'DM Mono',monospace"}}>$how Me The Money · Private Beta</span>
+        <span style={{fontSize:12,color:"#444454",fontFamily:"'DM Mono',monospace"}}>$how Me The Money</span>
         <div style={{display:"flex",gap:18}}>
           <button onClick={()=>setPrivacyOpen(true)} style={{background:"none",border:"none",color:"#444454",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Privacy</button>
-          <button onClick={onEnter} style={{background:"none",border:"none",color:"#444454",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Open App</button>
         </div>
       </footer>
     </div>
