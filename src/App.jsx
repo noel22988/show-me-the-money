@@ -343,76 +343,15 @@ function ThemePresets({accentColor,bgColor,onChange}){
 // ── DragList ──────────────────────────────────────────────────────────────────
 function DragList({items,onReorder,renderItem}){
   const T=useTheme();
-  const [dragging,setDragging]=useState(null); // index being dragged
-  const [over,setOver]=useState(null); // index being hovered
-  const [lifted,setLifted]=useState(null); // for visual lift effect
-  const longPressTimer=useRef(null);
-  const dragStartY=useRef(null);
-  const itemRefs=useRef([]);
-
-  const startLongPress=(i,clientY)=>{
-    longPressTimer.current=setTimeout(()=>{
-      setDragging(i); setLifted(i); dragStartY.current=clientY;
-      if(navigator.vibrate) navigator.vibrate(40);
-    },400);
-  };
-  const cancelLongPress=()=>{ clearTimeout(longPressTimer.current); };
-
-  const onTouchStart=(i,e)=>startLongPress(i,e.touches[0].clientY);
-  const onMouseDown=(i,e)=>startLongPress(i,e.clientY);
-
-  const onTouchMove=e=>{
-    if(dragging===null) return;
-    e.preventDefault();
-    const y=e.touches[0].clientY;
-    const els=itemRefs.current;
-    for(let j=0;j<els.length;j++){
-      if(!els[j]) continue;
-      const r=els[j].getBoundingClientRect();
-      if(y>=r.top&&y<=r.bottom){ setOver(j); break; }
-    }
-  };
-
-  const onTouchEnd=()=>{ finish(); };
-  const onMouseUp=()=>{ finish(); };
-
-  const finish=()=>{
-    clearTimeout(longPressTimer.current);
-    if(dragging!==null&&over!==null&&over!==dragging){
-      const a=[...items];
-      const[it]=a.splice(dragging,1);
-      a.splice(over,0,it);
-      onReorder(a);
-    }
-    setDragging(null); setOver(null); setLifted(null);
-  };
-
-  return <div onMouseUp={onMouseUp} onTouchEnd={onTouchEnd} onTouchMove={onTouchMove} style={{userSelect:"none"}}>
-    {(items||[]).map((item,i)=>{
-      const isLifted=lifted===i&&dragging===i;
-      const isOver=over===i&&dragging!==null&&dragging!==i;
-      return <div
-        key={item.id||i}
-        ref={el=>itemRefs.current[i]=el}
-        onMouseDown={e=>onMouseDown(i,e)}
-        onTouchStart={e=>onTouchStart(i,e)}
-        onMouseEnter={()=>dragging!==null&&setOver(i)}
-        style={{
-          transform:isLifted?"scale(1.02) translateY(-2px)":"scale(1)",
-          boxShadow:isLifted?`0 8px 24px rgba(0,0,0,0.3)`:"none",
-          borderTop:isOver?`2px solid ${T.accent}`:"2px solid transparent",
-          opacity:dragging!==null&&dragging===i?0.85:1,
-          transition:isLifted?"none":"transform .15s, box-shadow .15s",
-          cursor:dragging!==null?"grabbing":"grab",
-          borderRadius:12,
-          marginBottom:2,
-          zIndex:isLifted?10:1,
-          position:"relative",
-        }}>
-        {renderItem(item,i)}
-      </div>;
-    })}
-  </div>;
+  const move=(i,dir)=>{ const a=[...items]; const j=i+dir; if(j<0||j>=a.length) return; [a[i],a[j]]=[a[j],a[i]]; onReorder(a); };
+  return <div>{(items||[]).map((item,i)=>{
+    const isFirst=i===0; const isLast=i===items.length-1;
+    const stepper=items.length>1&&<div style={{display:"flex",flexDirection:"column",border:`1px solid ${T.border}`,borderRadius:6,overflow:"hidden",flexShrink:0}}>
+      <button onClick={()=>move(i,-1)} style={{background:"none",border:"none",cursor:isFirst?"default":"pointer",color:isFirst?T.border:T.textMuted,width:22,height:20,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,borderBottom:`1px solid ${T.border}`,padding:0,lineHeight:1}}>⌃</button>
+      <button onClick={()=>move(i,1)} style={{background:"none",border:"none",cursor:isLast?"default":"pointer",color:isLast?T.border:T.textMuted,width:22,height:20,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,padding:0,lineHeight:1}}>⌄</button>
+    </div>;
+    return <div key={item.id||i}>{renderItem(item,i,stepper)}</div>;
+  })}</div>;
 }
 
 // ── MonthPicker — positions relative to its own button ────────────────────────
@@ -1711,10 +1650,10 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         <DragList
           items={p.incomeStreams||[]}
           onReorder={list=>setP(prev=>({...prev,incomeStreams:list}))}
-          renderItem={s=><div style={{background:T.surface2,borderRadius:12,padding:"14px",border:`1px solid ${T.border}`,marginBottom:10}}>
-            <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:10,marginBottom:10,alignItems:"center"}}>
+          renderItem={(s,_idx,stepper)=><div style={{background:T.surface2,borderRadius:12,padding:"14px",border:`1px solid ${T.border}`,marginBottom:10}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:8,marginBottom:10,alignItems:"center"}}>
               <input type="text" placeholder="Stream name" value={s.name} onChange={e=>updS(s.id,"name",e.target.value)} style={inp2}/>
-              <span style={{color:T.textMuted,fontSize:12,opacity:.4,letterSpacing:1,userSelect:"none",cursor:"grab"}}>⠿</span>
+              {stepper}
               <button onClick={()=>rmS(s.id)} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:20,padding:"0 6px",lineHeight:1}}>×</button>
             </div>
             <div style={{display:"flex",borderRadius:9,overflow:"hidden",border:`1px solid ${T.border}`,marginBottom:10}}>
@@ -1740,11 +1679,11 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         <DragList
           items={p.fixedCommitments||[]}
           onReorder={list=>setP(prev=>({...prev,fixedCommitments:list}))}
-          renderItem={c=><div style={{background:T.surface2,borderRadius:12,padding:"14px",border:`1px solid ${T.border}`,marginBottom:10}}>
+          renderItem={(c,_idx,stepper)=><div style={{background:T.surface2,borderRadius:12,padding:"14px",border:`1px solid ${T.border}`,marginBottom:10}}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 80px auto auto",gap:8,marginBottom:12,alignItems:"center"}}>
               <input type="text" placeholder="Name (e.g. Insurance)" value={c.name} onChange={e=>updF(c.id,"name",e.target.value)} style={inp2}/>
               <input type="number" placeholder="0" value={c.amount||""} onChange={e=>updF(c.id,"amount",parseFloat(e.target.value)||0)} style={{...inp2,textAlign:"right"}}/>
-              <span style={{color:T.textMuted,fontSize:12,opacity:.4,letterSpacing:1,userSelect:"none",cursor:"grab"}}>⠿</span>
+              {stepper}
               <button onClick={()=>rmF(c.id)} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:20,padding:"0 6px",lineHeight:1,minHeight:44}}>×</button>
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
