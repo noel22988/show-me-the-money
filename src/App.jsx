@@ -342,8 +342,14 @@ function ThemePresets({accentColor,bgColor,onChange}){
 
 // ── DragList ──────────────────────────────────────────────────────────────────
 function DragList({items,onReorder,renderItem}){
-  const T=useTheme(); const [di,setDi]=useState(null); const [oi,setOi]=useState(null);
-  return <div>{(items||[]).map((item,i)=><div key={item.id||i} draggable onDragStart={()=>setDi(i)} onDragOver={e=>{e.preventDefault();setOi(i);}} onDrop={e=>{e.preventDefault();if(di===null||di===i)return;const a=[...items];const[it]=a.splice(di,1);a.splice(i,0,it);onReorder(a);setDi(null);setOi(null);}} onDragEnd={()=>{setDi(null);setOi(null);}} style={{opacity:di===i?0.4:1,borderTop:oi===i&&di!==i?`2px solid ${T.accent}`:"2px solid transparent"}}>{renderItem(item,i)}</div>)}</div>;
+  const move=(i,dir)=>{ const a=[...items]; const j=i+dir; if(j<0||j>=a.length) return; [a[i],a[j]]=[a[j],a[i]]; onReorder(a); };
+  return <div>{(items||[]).map((item,i)=><div key={item.id||i} style={{display:"flex",alignItems:"flex-start",gap:6}}>
+    <div style={{display:"flex",flexDirection:"column",gap:2,paddingTop:14,flexShrink:0}}>
+      <button onClick={()=>move(i,-1)} disabled={i===0} style={{background:"none",border:"none",color:i===0?"transparent":"#888898",cursor:i===0?"default":"pointer",fontSize:14,padding:"2px 4px",lineHeight:1}}>▲</button>
+      <button onClick={()=>move(i,1)} disabled={i===items.length-1} style={{background:"none",border:"none",color:i===items.length-1?"transparent":"#888898",cursor:i===items.length-1?"default":"pointer",fontSize:14,padding:"2px 4px",lineHeight:1}}>▼</button>
+    </div>
+    <div style={{flex:1,minWidth:0}}>{renderItem(item,i)}</div>
+  </div>)}</div>;
 }
 
 // ── MonthPicker — positions relative to its own button ────────────────────────
@@ -1252,13 +1258,9 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       </Card>}
       {/* Hero */}
       <Card>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
-          <div><p style={{margin:"0 0 2px",fontSize:16,color:T.textSecondary,fontWeight:500}}>{greeting()}, {(profile.name||"there").split(" ")[0]} 👋</p><p style={{margin:0,fontSize:12,color:T.textMuted,fontFamily:"'DM Mono'"}}>{monthLabel(selectedMonth)}</p></div>
-          <div style={{display:"flex",gap:10,alignItems:"center"}}>
-            {tutorialDismissed&&<button onClick={()=>{setTutorialDismissed(false);lsSave("tutorialDismissed",false);}} style={{background:"none",border:`1px solid ${T.border}`,borderRadius:8,color:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit",padding:"4px 10px",opacity:.7}}>? Help</button>}
-            <button onClick={()=>setShowPrivacy(true)} style={{background:"none",border:"none",color:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit",padding:0,opacity:.7}}>🔒 Privacy</button>
-            <a href="/landing" style={{color:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit",padding:0,opacity:.7,textDecoration:"none"}}>About</a>
-          </div>
+        <div style={{marginBottom:16}}>
+          <p style={{margin:"0 0 2px",fontSize:16,color:T.textSecondary,fontWeight:500}}>{greeting()}, {(profile.name||"there").split(" ")[0]} 👋</p>
+          <p style={{margin:0,fontSize:12,color:T.textMuted,fontFamily:"'DM Mono'"}}>{monthLabel(selectedMonth)}</p>
         </div>
         <div style={{display:"grid",gridTemplateColumns:isDesktop?"repeat(4,1fr)":"repeat(2,1fr)",gap:isDesktop?12:8,marginBottom:16}}>
           <CountUpBox label="Income" val={incTotal} color={T.positive} delay={0} sub={prevIncTotal>0?{col:incTotal>=prevIncTotal?T.positive:T.negative,text:`${incTotal>=prevIncTotal?"+":"-"}${fmt(Math.abs(incTotal-prevIncTotal))} vs last mo`}:null}/>
@@ -1647,8 +1649,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           items={p.incomeStreams||[]}
           onReorder={list=>setP(prev=>({...prev,incomeStreams:list}))}
           renderItem={s=><div style={{background:T.surface2,borderRadius:12,padding:"14px",border:`1px solid ${T.border}`,marginBottom:10}}>
-            <div style={{display:"grid",gridTemplateColumns:"auto 1fr auto",gap:10,marginBottom:10,alignItems:"center"}}>
-              <span style={{color:T.textMuted,cursor:"grab",fontSize:16,userSelect:"none",padding:"0 2px"}}>⠿</span>
+            <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,marginBottom:10,alignItems:"center"}}>
               <input type="text" placeholder="Stream name" value={s.name} onChange={e=>updS(s.id,"name",e.target.value)} style={inp2}/>
               <button onClick={()=>rmS(s.id)} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:20,padding:"0 6px",lineHeight:1}}>×</button>
             </div>
@@ -1676,11 +1677,10 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           items={p.fixedCommitments||[]}
           onReorder={list=>setP(prev=>({...prev,fixedCommitments:list}))}
           renderItem={c=><div style={{background:T.surface2,borderRadius:12,padding:"14px",border:`1px solid ${T.border}`,marginBottom:10}}>
-            <div style={{display:"grid",gridTemplateColumns:"auto 2fr 80px auto",gap:10,marginBottom:12,alignItems:"center"}}>
-              <span style={{color:T.textMuted,cursor:"grab",fontSize:16,userSelect:"none",padding:"0 2px"}}>⠿</span>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 80px auto",gap:8,marginBottom:12,alignItems:"center"}}>
               <input type="text" placeholder="Name (e.g. Insurance)" value={c.name} onChange={e=>updF(c.id,"name",e.target.value)} style={inp2}/>
               <input type="number" placeholder="0" value={c.amount||""} onChange={e=>updF(c.id,"amount",parseFloat(e.target.value)||0)} style={{...inp2,textAlign:"right"}}/>
-              <button onClick={()=>rmF(c.id)} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:20,padding:"0 6px",lineHeight:1}}>×</button>
+              <button onClick={()=>rmF(c.id)} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:20,padding:"0 6px",lineHeight:1,minHeight:44}}>×</button>
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
               <div>
@@ -1852,8 +1852,13 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       {isDesktop&&<div style={{width:SIDEBAR_W,background:T.surface,borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"28px 14px",position:"fixed",top:0,left:0,bottom:0,zIndex:50,boxShadow:`4px 0 24px rgba(0,0,0,${T.bgLight?0.05:0.18})`}}>
         {/* Brand + avatar */}
         <div style={{marginBottom:24,padding:"0 6px"}}>
-          <div style={{marginBottom:14,minHeight:42}}>
+          <div style={{marginBottom:8,minHeight:42}}>
             <LogoAnimation allTimeSaved={allTimeSaved} fmt={fmt} compact={false}/>
+          </div>
+          <div style={{display:"flex",gap:12,marginBottom:14}}>
+            {tutorialDismissed&&<button onClick={()=>{setTutorialDismissed(false);lsSave("tutorialDismissed",false);}} style={{background:"none",border:`1px solid ${T.border}`,borderRadius:7,color:T.textMuted,fontSize:10,cursor:"pointer",fontFamily:"inherit",padding:"2px 7px"}}>? Help</button>}
+            <button onClick={()=>setShowPrivacy(true)} style={{background:"none",border:"none",color:T.textMuted,fontSize:10,cursor:"pointer",fontFamily:"inherit",padding:0}}>🔒 Privacy</button>
+            <a href="/landing" style={{color:T.textMuted,fontSize:10,fontFamily:"inherit",textDecoration:"none"}}>About</a>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12}}>
             {profile.avatar
@@ -1902,16 +1907,11 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           <div style={{height:5,background:T.border,borderRadius:5,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(100,Math.max(0,savingsRate))}%`,background:savingsRate>=20?T.positive:savingsRate>=10?T.warning:T.negative,borderRadius:5,transition:"width .5s"}}/></div>
           <div style={{fontSize:11,color:savingsRate>=20?T.positive:savingsRate>=10?T.warning:T.negative,fontFamily:"'DM Mono'",fontWeight:600,marginTop:5,textAlign:"right"}}>{savingsRate.toFixed(1)}%</div>
         </div>}
-        {/* Sidebar footer links */}
-        <div style={{display:"flex",gap:14,padding:"14px 6px 0",borderTop:`1px solid ${T.border}`,marginTop:12}}>
-          <button onClick={()=>setShowPrivacy(true)} style={{background:"none",border:"none",color:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit",padding:0}}>🔒 Privacy</button>
-          <a href="/landing" style={{background:"none",border:"none",color:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit",padding:0,textDecoration:"none"}}>About</a>
-        </div>
       </div>}
 
       {/* ── Mobile header ── */}
-      {!isDesktop&&<div style={{padding:"12px 16px 10px",borderBottom:`1px solid ${T.border}`,background:T.bg,position:"sticky",top:0,zIndex:50}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+      {!isDesktop&&<div style={{borderBottom:`1px solid ${T.border}`,background:T.bg,position:"sticky",top:0,zIndex:50}}>
+        <div style={{padding:"12px 16px 8px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             {profile.avatar
               ?<img src={profile.avatar} alt="" style={{width:32,height:32,borderRadius:"50%",objectFit:"cover"}}/>
@@ -1921,6 +1921,11 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
             </div>
           </div>
           <MonthPicker value={selectedMonth} onChange={setSelectedMonth} startMonth={profile.startMonth}/>
+        </div>
+        <div style={{padding:"0 16px 8px",display:"flex",gap:14,alignItems:"center"}}>
+          {tutorialDismissed&&<button onClick={()=>{setTutorialDismissed(false);lsSave("tutorialDismissed",false);}} style={{background:"none",border:`1px solid ${T.border}`,borderRadius:7,color:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit",padding:"3px 8px"}}>? Help</button>}
+          <button onClick={()=>setShowPrivacy(true)} style={{background:"none",border:"none",color:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit",padding:0}}>🔒 Privacy</button>
+          <a href="/landing" style={{color:T.textMuted,fontSize:11,fontFamily:"inherit",textDecoration:"none"}}>About</a>
         </div>
       </div>}
 
