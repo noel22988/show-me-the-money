@@ -88,8 +88,22 @@ function pendingVarStreams(streams,ov,month){
 }
 
 // ── Habit helpers ─────────────────────────────────────────────────────────────
-function habitFlags(eh,ch){ const mf={},cf={}; for(const [k,v] of Object.entries(eh||{})) if(v>=HABIT_THRESHOLD) mf[k]=v; for(const [k,v] of Object.entries(ch||{})) if(v>=HABIT_THRESHOLD) cf[k]=v; return {mf,cf}; }
-function habitReason(tx,mf,cf){ const k=tx.description?.toLowerCase().trim(); if(mf[k]) return `excluded ${mf[k]}× before`; if(cf[tx.category]) return `category excluded ${cf[tx.category]}× before`; return null; }
+const HABIT_THRESHOLD = 1; // show in habit memory after being unchecked just once
+function habitFlags(eh,ch){
+  const mf={},cf={};
+  for(const [k,v] of Object.entries(eh||{})){
+    const count=typeof v==="object"?v.count:v; // handle old format
+    if(count>=HABIT_THRESHOLD) mf[k]=v;
+  }
+  for(const [k,v] of Object.entries(ch||{})) if(v>=HABIT_THRESHOLD) cf[k]=v;
+  return {mf,cf};
+}
+function habitReason(tx,mf,cf){
+  const k=tx.description?.toLowerCase().trim();
+  if(mf[k]) return `excluded before`;
+  if(cf[tx.category]) return `category excluded before`;
+  return null;
+}
 
 // ── CSV chunker ───────────────────────────────────────────────────────────────
 function splitCSV(text,size=15000){
@@ -368,34 +382,27 @@ function SixMonthChart({monthlyData,incomeStreams,selectedMonth,startMonth,fixed
     const saved=Math.max(0,inc-fixed-variable);
     return {m,inc,fixed,variable,saved,hasIncome:inc>0};
   }),[months,monthlyData,incomeStreams,fixedCommitments]);
-  const maxVal=useMemo(()=>Math.max(...data.map(d=>Math.max(d.inc,d.fixed+d.variable+d.saved)),1),[data]);
+  const maxVal=useMemo(()=>Math.max(...data.map(d=>d.fixed+d.variable+d.saved),1),[data]);
   const barH=100;
   return <div>
-    <div style={{display:"flex",alignItems:"flex-end",gap:10,height:barH,marginBottom:8}}>
-      {data.map(({m,inc,fixed,variable,saved,hasIncome})=>{
+    <div style={{display:"flex",alignItems:"flex-end",gap:6,height:barH,marginBottom:8}}>
+      {data.map(({m,inc,fixed,variable,saved})=>{
         const isCur=m===selectedMonth;
         const scale=(barH-14)/maxVal;
-        const incH=Math.max(2,inc*scale);
-        const fixH=Math.max(fixed>0?2:0,fixed*scale);
-        const varH=Math.max(variable>0?2:0,variable*scale);
-        const savH=Math.max(saved>0?2:0,saved*scale);
+        const fixH=Math.max(fixed>0?1:0,fixed*scale);
+        const varH=Math.max(variable>0?1:0,variable*scale);
+        const savH=Math.max(saved>0?1:0,saved*scale);
         return <div key={m} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-          <div style={{width:"100%",display:"flex",gap:3,alignItems:"flex-end",height:barH-14}}>
-            {/* Left bar: income */}
-            <div style={{flex:1,borderRadius:"4px 4px 0 0",background:hasIncome?T.accent+"70":"transparent",border:hasIncome?"none":`1.5px dashed ${T.border}`,height:incH,transition:"height .5s ease"}}/>
-            {/* Right bar: stacked fixed+variable+saved */}
-            <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"flex-end",height:barH-14,gap:0,borderRadius:"4px 4px 0 0",overflow:"hidden"}}>
-              {saved>0&&<div style={{background:T.positive,height:savH,transition:"height .5s ease",flexShrink:0}}/>}
-              {variable>0&&<div style={{background:T.negative,height:varH,transition:"height .5s ease",flexShrink:0}}/>}
-              {fixed>0&&<div style={{background:T.info,height:fixH,transition:"height .5s ease",flexShrink:0}}/>}
-            </div>
+          <div style={{width:"100%",display:"flex",flexDirection:"column",justifyContent:"flex-end",height:barH-14,gap:0,overflow:"hidden",outline:isCur?`1.5px solid ${T.accent}40`:"none"}}>
+            {saved>0&&<div style={{background:T.positive,height:savH,transition:"height .5s ease",flexShrink:0}}/>}
+            {variable>0&&<div style={{background:T.negative,height:varH,transition:"height .5s ease",flexShrink:0}}/>}
+            {fixed>0&&<div style={{background:T.info,height:fixH,transition:"height .5s ease",flexShrink:0}}/>}
           </div>
           <div style={{fontSize:9,color:isCur?T.accent:T.textMuted,fontFamily:"'DM Mono'",fontWeight:isCur?700:400,whiteSpace:"nowrap"}}>{monthLabelShort(m)}</div>
         </div>;
       })}
     </div>
     <div style={{display:"flex",gap:12,fontSize:11,color:T.textMuted,flexWrap:"wrap"}}>
-      <span><span style={{color:T.accent}}>■</span> Income</span>
       <span><span style={{color:T.info}}>■</span> Fixed</span>
       <span><span style={{color:T.negative}}>■</span> Variable</span>
       <span><span style={{color:T.positive}}>■</span> Saved</span>
@@ -740,8 +747,8 @@ function ResetModal({onConfirm,onClose,onDownloadFirst}){
 function FixedCommitModal({detected,fmt,onConfirm,onSkip}){
   const T=useTheme(); const [sel,setSel]=useState(detected.map((_,i)=>i)); const tog=i=>setSel(s=>s.includes(i)?s.filter(x=>x!==i):[...s,i]);
   return <Overlay onClose={onSkip}><ModalCard maxWidth={420}>
-    <p style={{margin:"0 0 4px",fontSize:18,fontWeight:700,color:T.textPrimary}}>Fixed commitments detected</p>
-    <p style={{margin:"0 0 16px",fontSize:13,color:T.textSecondary}}>These look like recurring fixed payments. Add them to your Fixed Commitments tracker?</p>
+    <p style={{margin:"0 0 4px",fontSize:18,fontWeight:700,color:T.textPrimary}}>Bills detected</p>
+    <p style={{margin:"0 0 16px",fontSize:13,color:T.textSecondary}}>These look like recurring fixed payments. Add them to your Bills?</p>
     <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:18}}>
       {detected.map((t,i)=><div key={i} onClick={()=>tog(i)} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",background:sel.includes(i)?T.accentMuted:T.surface2,border:`1px solid ${sel.includes(i)?T.accentBorder:T.border}`,borderRadius:12,cursor:"pointer"}}>
         <Check checked={sel.includes(i)} onChange={()=>tog(i)}/>
@@ -757,7 +764,7 @@ function RecurringModal({suggestions,onConfirm,onDismiss}){
   const T=useTheme(); const [sel,setSel]=useState(suggestions.map((_,i)=>i)); const tog=i=>setSel(s=>s.includes(i)?s.filter(x=>x!==i):[...s,i]);
   return <Overlay onClose={onDismiss}><ModalCard maxWidth={420}>
     <p style={{margin:"0 0 4px",fontSize:18,fontWeight:700,color:T.textPrimary}}>Recurring transactions detected</p>
-    <p style={{margin:"0 0 16px",fontSize:13,color:T.textSecondary}}>These appear every month at a similar amount. Add to Fixed Commitments?</p>
+    <p style={{margin:"0 0 16px",fontSize:13,color:T.textSecondary}}>These appear every month at a similar amount. Add to Bills?</p>
     <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:18}}>
       {suggestions.map((s,i)=><div key={i} onClick={()=>tog(i)} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",background:sel.includes(i)?T.accentMuted:T.surface2,border:`1px solid ${sel.includes(i)?T.accentBorder:T.border}`,borderRadius:12,cursor:"pointer"}}>
         <Check checked={sel.includes(i)} onChange={()=>tog(i)}/>
@@ -786,13 +793,16 @@ function Onboarding({onComplete}){
     // Step 0 — identity
     <div key="s0">
       <div style={{textAlign:"center",marginBottom:28}}>
-        <div style={{fontSize:12,letterSpacing:3,textTransform:"uppercase",color:T.accent,fontFamily:"'DM Mono'",marginBottom:10,opacity:.8}}>Welcome to</div>
-        <div style={{fontSize:32,fontWeight:700,color:T.textPrimary,letterSpacing:-0.5,lineHeight:1.2}}>$how Me The Money</div>
-        <div style={{fontSize:15,color:T.textSecondary,marginTop:10,lineHeight:1.6}}>Import statements, track spending, understand your money.</div>
+        <div style={{fontSize:28,marginBottom:12}}>👋</div>
+        <div style={{fontSize:28,fontWeight:800,color:T.textPrimary,letterSpacing:-0.5,lineHeight:1.2,marginBottom:10}}>Welcome to<br/><span style={{color:T.accent}}>$how Me The Money</span></div>
+        <div style={{fontSize:14,color:T.textSecondary,lineHeight:1.7,maxWidth:340,margin:"0 auto"}}>Upload your bank statement, Claude reads every transaction, you see exactly where your money goes. All on your device — nothing stored anywhere.</div>
       </div>
-      <div style={{display:"flex",justifyContent:"center",marginBottom:24}}>
-        <div onClick={()=>avatarRef.current.click()} style={{width:80,height:80,borderRadius:"50%",background:T.accentMuted,border:`2px dashed ${T.accentBorder}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",overflow:"hidden"}}>
-          {p.avatar?<img src={p.avatar} alt="" style={{width:80,height:80,objectFit:"cover",borderRadius:"50%",display:"block"}}/>:<span style={{fontSize:32,color:T.accent,opacity:.7}}>+</span>}
+      <div style={{display:"flex",justifyContent:"center",marginBottom:20}}>
+        <div style={{position:"relative",width:80,height:80}}>
+          <div onClick={()=>avatarRef.current.click()} style={{width:80,height:80,borderRadius:"50%",background:T.accentMuted,border:`2px dashed ${T.accentBorder}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",overflow:"hidden"}}>
+            {p.avatar?<img src={p.avatar} alt="" style={{width:80,height:80,objectFit:"cover",borderRadius:"50%",display:"block"}}/>:<span style={{fontSize:32,color:T.accent,opacity:.7}}>+</span>}
+          </div>
+          <div style={{position:"absolute",bottom:-2,right:-2,width:22,height:22,borderRadius:"50%",background:T.accent,border:`2px solid ${T.bg}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:T.accentText,cursor:"pointer"}} onClick={()=>avatarRef.current.click()}>✎</div>
         </div>
         <input ref={avatarRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleAvatar}/>
       </div>
@@ -801,25 +811,26 @@ function Onboarding({onComplete}){
         <input placeholder="Occupation (optional)" value={p.occupation||""} onChange={e=>setP(v=>({...v,occupation:e.target.value}))} style={inp}/>
         <select value={p.currency} onChange={e=>setP(v=>({...v,currency:e.target.value}))} style={inp}>{CURRENCIES.map(c=><option key={c}>{c}</option>)}</select>
         <div>
-          <div style={{fontSize:12,color:T.textMuted,marginBottom:6}}>Tracking from (your fresh start month)</div>
+          <div style={{fontSize:12,color:T.textMuted,marginBottom:6}}>Tracking from — your fresh start month</div>
           <input type="month" value={p.startMonth} onChange={e=>setP(v=>({...v,startMonth:e.target.value}))} style={inp}/>
-          <div style={{fontSize:11,color:T.textMuted,marginTop:5}}>Only months from here will appear in the app.</div>
+          <div style={{fontSize:11,color:T.textMuted,marginTop:5}}>Only months from here will appear in your dashboard.</div>
         </div>
       </div>
-      <Btn onClick={()=>p.name.trim()&&setStep(1)} disabled={!p.name.trim()} style={{marginTop:24}}>Continue →</Btn>
+      <Btn onClick={()=>p.name.trim()&&setStep(1)} disabled={!p.name.trim()} style={{marginTop:24,padding:"14px"}}>Continue →</Btn>
     </div>,
+
     // Step 1 — income
     <div key="s1">
-      <p style={{margin:"0 0 6px",fontSize:22,fontWeight:700,color:T.textPrimary}}>Income streams</p>
-      <p style={{margin:"0 0 18px",fontSize:14,color:T.textSecondary,lineHeight:1.6}}>Fixed = same every month. Variable = enter each month. One-off = occasional.</p>
-      <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:14}}>
+      <p style={{margin:"0 0 4px",fontSize:22,fontWeight:800,color:T.textPrimary}}>Income sources</p>
+      <p style={{margin:"0 0 18px",fontSize:14,color:T.textSecondary,lineHeight:1.65}}>Tell us how you earn so we can calculate how much you're saving each month.</p>
+      <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:4}}>
         {p.incomeStreams.map((s,i)=><div key={s.id} style={{background:T.surface2,borderRadius:12,padding:"14px",border:`1px solid ${T.border}`}}>
           <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,marginBottom:10,alignItems:"center"}}>
-            <input placeholder="Stream name (e.g. Salary)" value={s.name} onChange={e=>updStream(s.id,"name",e.target.value)} style={inp}/>
-            {i>0&&<button onClick={()=>setP(v=>({...v,incomeStreams:v.incomeStreams.filter(x=>x.id!==s.id)}))} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:20,padding:"0 6px"}}>×</button>}
+            <input placeholder="Name (e.g. Salary, Freelance)" value={s.name} onChange={e=>updStream(s.id,"name",e.target.value)} style={inp}/>
+            {i>0&&<button onClick={()=>setP(v=>({...v,incomeStreams:v.incomeStreams.filter(x=>x.id!==s.id)}))} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:20,padding:"4px 6px",minHeight:44}}>×</button>}
           </div>
           <div style={{display:"flex",borderRadius:9,overflow:"hidden",border:`1px solid ${T.border}`,marginBottom:10}}>
-            {["fixed","variable","oneoff"].map(t=><button key={t} onClick={()=>updStream(s.id,"type",t)} style={{flex:1,padding:"8px 6px",background:s.type===t?T.accent:"transparent",border:"none",color:s.type===t?T.accentText:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:s.type===t?700:400}}>{t==="oneoff"?"One-off":t.charAt(0).toUpperCase()+t.slice(1)}</button>)}
+            {[["fixed","Fixed","Same amount every month"],["variable","Variable","Changes — you enter it monthly"],["oneoff","One-off","Single payment, one month"]].map(([t,label,hint])=><button key={t} onClick={()=>updStream(s.id,"type",t)} title={hint} style={{flex:1,padding:"9px 4px",background:s.type===t?T.accent:"transparent",border:"none",color:s.type===t?T.accentText:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:s.type===t?700:400}}>{label}</button>)}
           </div>
           {s.type==="fixed"&&<>
             <input type="number" placeholder="Monthly amount" value={s.defaultAmount||""} onChange={e=>updStream(s.id,"defaultAmount",e.target.value)} style={{...inp,marginBottom:10}}/>
@@ -831,26 +842,29 @@ function Onboarding({onComplete}){
           {s.type==="oneoff"&&<div><div style={{fontSize:11,color:T.textMuted,marginBottom:4}}>For which month?</div><input type="month" value={s.startFrom||""} onChange={e=>updStream(s.id,"startFrom",e.target.value)} style={inp}/></div>}
         </div>)}
       </div>
-      <button onClick={()=>setP(v=>({...v,incomeStreams:[...v.incomeStreams,{id:`s${Date.now()}`,name:"",type:"fixed",defaultAmount:"",active:true,startFrom:"",endMonth:""}]}))} style={{padding:"10px",background:"transparent",border:`1px dashed ${T.borderMid}`,borderRadius:10,color:T.textMuted,fontFamily:"inherit",fontSize:14,cursor:"pointer",width:"100%",marginBottom:18}}>+ Add income stream</button>
-      <Btn onClick={()=>setStep(2)}>Continue →</Btn>
-      <Btn variant="ghost" onClick={()=>setStep(2)} style={{marginTop:10}}>Skip for now</Btn>
+      <button onClick={()=>setP(v=>({...v,incomeStreams:[...v.incomeStreams,{id:`s${Date.now()}`,name:"",type:"fixed",defaultAmount:"",active:true,startFrom:"",endMonth:""}]}))} style={{padding:"12px",background:"transparent",border:`1px dashed ${T.borderMid}`,borderRadius:10,color:T.textMuted,fontFamily:"inherit",fontSize:14,cursor:"pointer",width:"100%",marginBottom:18,marginTop:10}}>+ Add income source</button>
+      <Btn onClick={()=>setStep(2)} style={{padding:"14px"}}>Continue →</Btn>
+      <Btn variant="ghost" onClick={()=>setStep(2)} style={{marginTop:10,padding:"14px"}}>Skip for now</Btn>
     </div>,
+
     // Step 2 — theme
     <div key="s2">
-      <p style={{margin:"0 0 18px",fontSize:22,fontWeight:700,color:T.textPrimary}}>Choose your theme</p>
+      <p style={{margin:"0 0 6px",fontSize:22,fontWeight:800,color:T.textPrimary}}>Make it yours</p>
+      <p style={{margin:"0 0 18px",fontSize:14,color:T.textSecondary,lineHeight:1.6}}>Pick a theme. You can always change this later in Profile.</p>
       <ThemePresets accentColor={p.accentColor} bgColor={p.bgColor} onChange={(ac,bg)=>setP(x=>({...x,accentColor:ac,bgColor:bg}))}/>
-      <Btn onClick={()=>setStep(3)} style={{marginTop:24}}>Continue →</Btn>
+      <Btn onClick={()=>setStep(3)} style={{marginTop:24,padding:"14px"}}>Continue →</Btn>
     </div>,
-    // Step 3 — fixed commitments
+
+    // Step 3 — bills
     <div key="s3">
-      <p style={{margin:"0 0 6px",fontSize:22,fontWeight:700,color:T.textPrimary}}>Fixed commitments</p>
-      <p style={{margin:"0 0 14px",fontSize:14,color:T.textSecondary,lineHeight:1.6}}>Insurance, rent, loans — things that go out every month. Leave dates blank to apply from the start with no end date.</p>
+      <p style={{margin:"0 0 4px",fontSize:22,fontWeight:800,color:T.textPrimary}}>Monthly bills</p>
+      <p style={{margin:"0 0 14px",fontSize:14,color:T.textSecondary,lineHeight:1.65}}>Insurance, rent, loans — things that go out every month regardless of what you spend. Leave dates blank if they're ongoing.</p>
       <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:14}}>
         {(p.fixedCommitments||[]).map(c=><div key={c.id} style={{background:T.surface2,borderRadius:12,padding:"12px",border:`1px solid ${T.border}`}}>
           <div style={{display:"grid",gridTemplateColumns:"2fr 80px auto",gap:8,marginBottom:8,alignItems:"center"}}>
-            <input placeholder="Name (e.g. Insurance)" value={c.name} onChange={e=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.map(x=>x.id===c.id?{...x,name:e.target.value}:x)}))} style={inp}/>
+            <input placeholder="Bill name (e.g. Rent, Insurance)" value={c.name} onChange={e=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.map(x=>x.id===c.id?{...x,name:e.target.value}:x)}))} style={inp}/>
             <input type="number" placeholder="Amt" value={c.amount||""} onChange={e=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.map(x=>x.id===c.id?{...x,amount:e.target.value}:x)}))} style={{...inp,textAlign:"right"}}/>
-            <button onClick={()=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.filter(x=>x.id!==c.id)}))} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:20,padding:"0 6px"}}>×</button>
+            <button onClick={()=>setP(v=>({...v,fixedCommitments:v.fixedCommitments.filter(x=>x.id!==c.id)}))} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:20,padding:"4px 6px",minHeight:44}}>×</button>
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
             <div><div style={{fontSize:11,color:T.textMuted,marginBottom:3}}>Start from (blank = always)</div><input type="month" value={c.startFrom||""} onChange={e=>setP(x=>({...x,fixedCommitments:x.fixedCommitments.map(f=>f.id===c.id?{...f,startFrom:e.target.value}:f)}))} style={inp}/></div>
@@ -858,9 +872,16 @@ function Onboarding({onComplete}){
           </div>
         </div>)}
       </div>
-      <button onClick={()=>setP(v=>({...v,fixedCommitments:[...(v.fixedCommitments||[]),{id:`c${Date.now()}`,name:"",amount:"",startFrom:"",endMonth:""}]}))} style={{padding:"10px",background:"transparent",border:`1px dashed ${T.borderMid}`,borderRadius:10,color:T.textMuted,fontFamily:"inherit",fontSize:14,cursor:"pointer",width:"100%",marginBottom:18}}>+ Add commitment</button>
-      <Btn onClick={finish}>Let's go →</Btn>
-      <Btn variant="ghost" onClick={finish} style={{marginTop:10}}>Skip for now</Btn>
+      <button onClick={()=>setP(v=>({...v,fixedCommitments:[...(v.fixedCommitments||[]),{id:`c${Date.now()}`,name:"",amount:"",startFrom:"",endMonth:""}]}))} style={{padding:"12px",background:"transparent",border:`1px dashed ${T.borderMid}`,borderRadius:10,color:T.textMuted,fontFamily:"inherit",fontSize:14,cursor:"pointer",width:"100%",marginBottom:18}}>+ Add bill</button>
+      {/* What happens next */}
+      <div style={{background:T.accentMuted,border:`1px solid ${T.accentBorder}`,borderRadius:12,padding:"14px 16px",marginBottom:18}}>
+        <div style={{fontSize:13,fontWeight:600,color:T.accent,marginBottom:6}}>What happens next</div>
+        <div style={{display:"flex",flexDirection:"column",gap:5}}>
+          {["Go to Add → upload your first bank statement","Review what Claude extracted — approve or skip","See your full breakdown in Money"].map((s,i)=><div key={i} style={{display:"flex",gap:8,fontSize:12,color:T.textSecondary}}><span style={{color:T.accent,flexShrink:0}}>{i+1}.</span>{s}</div>)}
+        </div>
+      </div>
+      <Btn onClick={finish} style={{padding:"14px"}}>Let's go →</Btn>
+      <Btn variant="ghost" onClick={finish} style={{marginTop:10,padding:"14px"}}>Skip for now</Btn>
     </div>
   ];
 
@@ -902,7 +923,6 @@ export default function App(){
   const [showPrivacy,setShowPrivacy]=useState(false);
   const [fixedCommitDetected,setFixedCommitDetected]=useState(null);
   const [recurringDetected,setRecurringDetected]=useState(null);
-  const [archiveOpen,setArchiveOpen]=useState(false);
   const fileRef=useRef(); const restoreRef=useRef(); const backupTimer=useRef(null);
   const isDesktop=useMemo(()=>window.innerWidth>=768,[]);
 
@@ -966,7 +986,7 @@ export default function App(){
     if(pendingTxs.length>0) return {color:T.warning,title:`${pendingTxs.length} transactions waiting for review`,sub:"Tap to approve",tab:"review"};
     if(pendingVars.length>0) return {color:T.warning,title:"Variable income needs entry",sub:"Tap Add to enter amounts",tab:"add"};
     if(!hasImport) return {color:T.accent,title:`Import ${monthLabel(selectedMonth)} statement`,sub:"Upload your bank statement",tab:"add"};
-    if(incTotal===0) return {color:T.info,title:"Set up income streams",sub:"Needed to calculate savings rate",tab:"profile"};
+    if(incTotal===0) return {color:T.info,title:"Set up income sources",sub:"Needed to calculate savings rate",tab:"profile"};
     return null;
   },[pendingTxs.length,pendingVars.length,hasImport,incTotal,selectedMonth,T]);
 
@@ -987,8 +1007,21 @@ export default function App(){
   const commitTransactions=async()=>{
     const checked=pendingTxs.filter(t=>t.checked); const unchecked=pendingTxs.filter(t=>!t.checked);
     const newEh={...eh},newCh={...ch};
-    unchecked.forEach(t=>{ const k=t.description?.toLowerCase().trim(); newEh[k]=(newEh[k]||0)+1; newCh[t.category]=(newCh[t.category]||0)+1; });
-    checked.forEach(t=>{ const k=t.description?.toLowerCase().trim(); if(newEh[k]) newEh[k]=Math.max(0,newEh[k]-1); });
+    unchecked.forEach(t=>{
+      const k=t.description?.toLowerCase().trim();
+      const existing=newEh[k]; const prevCount=typeof existing==="object"?existing.count:(existing||0);
+      newEh[k]={count:prevCount+1,lastTx:{id:t.id,date:t.date,description:t.description,amount:t.amount,category:t.category}};
+      newCh[t.category]=(newCh[t.category]||0)+1;
+    });
+    checked.forEach(t=>{
+      const k=t.description?.toLowerCase().trim();
+      if(newEh[k]){
+        const prevCount=typeof newEh[k]==="object"?newEh[k].count:newEh[k];
+        const lastTx=typeof newEh[k]==="object"?newEh[k].lastTx:null;
+        const newCount=Math.max(0,prevCount-1);
+        if(newCount===0) delete newEh[k]; else newEh[k]={count:newCount,lastTx};
+      }
+    });
     saveArchive([...unchecked.map(({habitReason:_,checked:__,...t})=>({...t,archivedAt:new Date().toISOString()})),...archive].slice(0,500));
     const byMonth={};
     checked.forEach(t=>{ const m=monthKey(t.date); if(!byMonth[m]) byMonth[m]=[]; byMonth[m].push(t); });
@@ -1164,8 +1197,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
   if(!profile.onboarded) return <ThemeCtx.Provider value={buildTheme(profile.accentColor||"#C8FF57",profile.bgColor||"#0C0C12")}><Onboarding onComplete={saveProfile}/></ThemeCtx.Provider>;
 
   const inp={padding:"11px 14px",background:T.surface2,border:`1px solid ${T.borderMid}`,borderRadius:10,color:T.textPrimary,fontFamily:"inherit",fontSize:14,outline:"none",width:"100%",boxSizing:"border-box"};
-  const hasPending=pendingTxs.length>0;
-  const TABS=[["home","🏠","Home"],["add","➕","Add"],["money","💰","Money"],...(hasPending?[["review","📋","Review"]]:[]),["profile","👤","Profile"]];
+  const TABS=[["home","🏠","Home"],["add","➕","Add"],["review","📋","Review"],["money","💰","Money"],["profile","👤","Profile"]];
   const filteredTxs=catFilter==="All"?committedTxs:committedTxs.filter(t=>t.category===catFilter);
 
   // ── Nav item ────────────────────────────────────────────────────────────────
@@ -1199,30 +1231,31 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       {!tutorialDismissed&&<Card style={{border:`1px solid ${T.accentBorder}`,background:T.accentMuted}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
           <div style={{fontSize:15,fontWeight:700,color:T.accent}}>👋 Getting Started</div>
-          <button onClick={()=>{setTutorialDismissed(true);lsSave("tutorialDismissed",true);}} style={{background:"none",border:"none",color:T.accent,fontSize:18,cursor:"pointer",padding:"0 4px",opacity:.6,lineHeight:1}}>×</button>
+          <button onClick={()=>{setTutorialDismissed(true);lsSave("tutorialDismissed",true);}} style={{background:"none",border:"none",color:T.accent,fontSize:18,cursor:"pointer",padding:"4px 6px",opacity:.6,lineHeight:1,minHeight:36}}>×</button>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
           {[
-            {icon:"👤",label:"Set up your profile",desc:"Add income streams and fixed commitments",tab:"profile",done:incTotal>0},
-            {icon:"➕",label:"Import your first statement",desc:"Upload a PDF or CSV from your bank",tab:"add",done:countAllTx(monthlyData)>0},
-            {icon:"📋",label:"Review imported transactions",desc:"Check and approve what Claude extracted",tab:"review",done:countAllTx(monthlyData)>0&&pendingTxs.length===0},
-            {icon:"💰",label:"Explore your breakdown",desc:"See spending by category and savings rate",tab:"money",done:countAllTx(monthlyData)>0},
-          ].map(({icon,label,desc,tab:t,done})=><div key={label} onClick={()=>!done&&setTab(t)} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",background:done?T.accentMuted:T.surface,borderRadius:10,border:`1px solid ${done?T.accentBorder:T.border}`,cursor:done?"default":"pointer",opacity:done?0.6:1}}>
+            {icon:"👤",label:"Set up your profile",desc:"Add your income sources and monthly bills",tab:"profile",done:incTotal>0},
+            {icon:"➕",label:"Upload your first statement",desc:"Go to Add — drop in a PDF or CSV from your bank",tab:"add",done:countAllTx(monthlyData)>0},
+            {icon:"📋",label:"Review what Claude found",desc:"Approve, skip, or edit each transaction",tab:"review",done:countAllTx(monthlyData)>0&&pendingTxs.length===0},
+            {icon:"💰",label:"See where your money went",desc:"Check your spending breakdown in Money",tab:"money",done:countAllTx(monthlyData)>0},
+          ].map(({icon,label,desc,tab:t,done})=><div key={label} onClick={()=>!done&&setTab(t)} style={{display:"flex",alignItems:"center",gap:12,padding:"12px",background:done?T.accentMuted:T.surface,borderRadius:10,border:`1px solid ${done?T.accentBorder:T.border}`,cursor:done?"default":"pointer",opacity:done?0.6:1,minHeight:44}}>
             <span style={{fontSize:20,flexShrink:0}}>{done?"✅":icon}</span>
             <div style={{flex:1,minWidth:0}}>
               <div style={{fontSize:13,fontWeight:600,color:done?T.textMuted:T.textPrimary}}>{label}</div>
-              <div style={{fontSize:12,color:T.textMuted,marginTop:1}}>{desc}</div>
+              <div style={{fontSize:12,color:T.textMuted,marginTop:2,lineHeight:1.4}}>{desc}</div>
             </div>
-            {!done&&<span style={{fontSize:14,color:T.accent,opacity:.6,flexShrink:0}}>→</span>}
+            {!done&&<span style={{fontSize:16,color:T.accent,opacity:.6,flexShrink:0}}>→</span>}
           </div>)}
         </div>
-        {[incTotal>0,countAllTx(monthlyData)>0].every(Boolean)&&<button onClick={()=>{setTutorialDismissed(true);lsSave("tutorialDismissed",true);}} style={{marginTop:12,width:"100%",padding:"9px",background:T.accent,border:"none",borderRadius:10,fontFamily:"inherit",fontSize:13,fontWeight:600,color:T.accentText,cursor:"pointer"}}>All done — hide this</button>}
+        {[incTotal>0,countAllTx(monthlyData)>0].every(Boolean)&&<button onClick={()=>{setTutorialDismissed(true);lsSave("tutorialDismissed",true);}} style={{marginTop:12,width:"100%",padding:"12px",background:T.accent,border:"none",borderRadius:10,fontFamily:"inherit",fontSize:13,fontWeight:600,color:T.accentText,cursor:"pointer",minHeight:44}}>All done — hide this ✓</button>}
       </Card>}
       {/* Hero */}
       <Card>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
           <div><p style={{margin:"0 0 2px",fontSize:16,color:T.textSecondary,fontWeight:500}}>{greeting()}, {(profile.name||"there").split(" ")[0]} 👋</p><p style={{margin:0,fontSize:12,color:T.textMuted,fontFamily:"'DM Mono'"}}>{monthLabel(selectedMonth)}</p></div>
           <div style={{display:"flex",gap:10,alignItems:"center"}}>
+            {tutorialDismissed&&<button onClick={()=>{setTutorialDismissed(false);lsSave("tutorialDismissed",false);}} style={{background:"none",border:`1px solid ${T.border}`,borderRadius:8,color:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit",padding:"4px 10px",opacity:.7}}>? Help</button>}
             <button onClick={()=>setShowPrivacy(true)} style={{background:"none",border:"none",color:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit",padding:0,opacity:.7}}>🔒 Privacy</button>
             <a href="/landing" style={{color:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit",padding:0,opacity:.7,textDecoration:"none"}}>About</a>
           </div>
@@ -1232,7 +1265,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           <CountUpBox label="Fixed" val={fixedTotal} color={T.info} delay={100} sub={prevFixed>0?{col:fixedTotal<=prevFixed?T.positive:T.negative,text:`${fixedTotal<=prevFixed?"-":"+"}${fmt(Math.abs(fixedTotal-prevFixed))} vs last mo`}:null}/>
           <CountUpBox label="Spent" val={varTotal} color={T.negative} delay={200} sub={prevVarTotal>0?{col:varTotal<=prevVarTotal?T.positive:T.negative,text:`${varTotal<=prevVarTotal?"-":"+"}${fmt(Math.abs(varTotal-prevVarTotal))} vs last mo`}:null}/>
           {incTotal===0
-            ?<div style={{background:T.bg,borderRadius:14,padding:isDesktop?"18px 20px":"14px 16px",border:`1px solid ${T.border}`,display:"flex",alignItems:"center"}}><span style={{fontSize:12,color:T.textMuted,cursor:"pointer"}} onClick={()=>setTab("profile")}>Set up income →</span></div>
+            ?<div style={{background:T.bg,borderRadius:14,padding:isDesktop?"18px 20px":"14px 16px",border:`1px solid ${T.border}`,display:"flex",alignItems:"center"}}><span style={{fontSize:12,color:T.textMuted,cursor:"pointer"}} onClick={()=>setTab("profile")}>Set up income sources →</span></div>
             :<CountUpBox label="Saved" val={saved} color={saved>=0?T.positive:T.negative} delay={300} sub={prevSaved!==0?{col:saved>=prevSaved?T.positive:T.negative,text:`${saved>=prevSaved?"+":"-"}${fmt(Math.abs(saved-prevSaved))} vs last mo`}:null}/>}
         </div>
         {incTotal>0&&<>
@@ -1271,49 +1304,29 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
   // ── ADD ───────────────────────────────────────────────────────────────────────
   const AddContent=()=><div style={{display:"flex",flexDirection:"column",gap:16}}>
-    <VarIncomeEntry streams={streams} ov={ov} onUpdate={updateOv} month={selectedMonth}/>
-    {streams.filter(s=>s.active&&s.type==="fixed"&&(!s.startFrom||selectedMonth>=s.startFrom)).length>0&&<Card>
-      <SLabel>Fixed Income — Auto-populated</SLabel>
-      {streams.filter(s=>s.active&&s.type==="fixed"&&(!s.startFrom||selectedMonth>=s.startFrom)).map(s=><div key={s.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:`1px solid ${T.border}`}}>
-        <div style={{display:"flex",gap:10,alignItems:"center"}}><div style={{width:8,height:8,borderRadius:"50%",background:T.info}}/><span style={{fontSize:14,color:T.textPrimary}}>{s.name}</span></div>
-        <EditableAmt value={ov[s.id]!==undefined?ov[s.id]:s.defaultAmount} fmt={fmt} color={T.info} onSave={v=>updateOv(s.id,v)}/>
-      </div>)}
-    </Card>}
+    {/* Import — hero, full width */}
     <Card>
-      <SLabel>Import Statement</SLabel>
-      <div onClick={()=>!uploading&&fileRef.current.click()} onMouseEnter={e=>{if(!uploading)e.currentTarget.style.borderColor=T.accent+"70";}} onMouseLeave={e=>{e.currentTarget.style.borderColor=T.borderMid;}} style={{border:`2px dashed ${T.borderMid}`,borderRadius:14,padding:"32px 20px",textAlign:"center",cursor:uploading?"default":"pointer",transition:"border-color .2s"}}>
-        <div style={{fontSize:36,marginBottom:10}}>{uploading?"⏳":"📄"}</div>
-        <p style={{margin:"0 0 6px",fontWeight:700,fontSize:16,color:T.textPrimary}}>{uploading?"Importing…":"Upload bank statement"}</p>
-        <p style={{margin:"0 0 10px",color:T.textMuted,fontSize:13}}>PDF, CSV, or image · Claude extracts everything · Review before saving</p>
-        <div style={{display:"inline-flex",alignItems:"center",gap:6,background:T.warning+"18",border:`1px solid ${T.warning}40`,borderRadius:8,padding:"6px 12px",marginBottom:14}}><span style={{fontSize:14}}>📶</span><span style={{fontSize:12,color:T.warning,fontWeight:500}}>Use WiFi for best results — mobile data may time out on large files</span></div>
-        <div style={{display:"inline-block",padding:"10px 24px",background:uploading?T.border:T.accent,color:uploading?T.textMuted:T.accentText,borderRadius:10,fontWeight:700,fontSize:14}}>{uploading?"Working…":"Choose File"}</div>
+      <div onClick={()=>!uploading&&fileRef.current.click()} onMouseEnter={e=>{if(!uploading)e.currentTarget.style.borderColor=T.accent+"70";}} onMouseLeave={e=>{e.currentTarget.style.borderColor=T.borderMid;}} style={{border:`2px dashed ${T.borderMid}`,borderRadius:14,padding:"36px 20px",textAlign:"center",cursor:uploading?"default":"pointer",transition:"border-color .2s"}}>
+        <div style={{fontSize:44,marginBottom:12}}>{uploading?"⏳":"📄"}</div>
+        <p style={{margin:"0 0 6px",fontWeight:700,fontSize:18,color:T.textPrimary}}>{uploading?"Importing…":"Upload your bank statement"}</p>
+        <p style={{margin:"0 0 12px",color:T.textMuted,fontSize:14,lineHeight:1.6}}>PDF, CSV, or image · Any bank · Claude extracts everything · You review before saving</p>
+        <div style={{display:"inline-flex",alignItems:"center",gap:6,background:T.warning+"18",border:`1px solid ${T.warning}40`,borderRadius:8,padding:"8px 14px",marginBottom:18}}><span style={{fontSize:14}}>📶</span><span style={{fontSize:13,color:T.warning,fontWeight:500}}>Use WiFi for best results</span></div>
+        <div><div style={{display:"inline-block",padding:"13px 32px",background:uploading?T.border:T.accent,color:uploading?T.textMuted:T.accentText,borderRadius:12,fontWeight:700,fontSize:15}}>{uploading?"Working…":"Choose File"}</div></div>
         {uploadMsg&&<p style={{marginTop:14,fontSize:13,color:uploadMsg.startsWith("✓")?T.positive:T.negative,margin:"14px 0 0"}}>{uploadMsg}</p>}
       </div>
       <input ref={fileRef} type="file" accept="*/*" style={{display:"none"}} onChange={handleFile}/>
     </Card>
+    {/* Manual add */}
     <Card>
-      <SLabel>Add Manually</SLabel>
+      <SLabel>Add manually</SLabel>
       <ManualAddForm categories={CATS} defaultDate={todayStr()} onAdd={addManual}/>
     </Card>
-    {/* Archive */}
-    <div>
-      <button onClick={()=>setArchiveOpen(o=>!o)} style={{width:"100%",padding:"12px 18px",background:"transparent",border:`1px solid ${T.border}`,borderRadius:14,fontFamily:"inherit",fontSize:14,color:T.textSecondary,cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <span>🗑 Archive ({archive.length} items)</span><span style={{fontSize:12,color:T.textMuted}}>{archiveOpen?"▲":"▼"}</span>
-      </button>
-      {archiveOpen&&<div style={{marginTop:10,display:"flex",flexDirection:"column",gap:8}}>
-        {archive.length===0?<p style={{fontSize:14,color:T.textMuted,padding:"14px 0",margin:0}}>No archived transactions yet. Unchecked imports and deleted transactions appear here.</p>
-          :archive.slice(0,60).map(t=><div key={t.id} style={{display:"flex",alignItems:"center",gap:12,background:T.surface,borderRadius:14,padding:"12px 16px",border:`1px solid ${T.border}`}}>
-            <div style={{flex:1,minWidth:0}}><div style={{fontSize:14,color:T.textSecondary,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.description}</div><div style={{fontSize:12,color:T.textMuted,fontFamily:"'DM Mono'",marginTop:2}}>{t.date} · {t.category?.split(" ")[0]}</div></div>
-            <div style={{fontFamily:"'DM Mono'",fontSize:13,color:T.textMuted,flexShrink:0}}>{fmt(Math.abs(t.amount))}</div>
-            <button onClick={()=>restoreToReview(t.id)} style={{padding:"6px 14px",background:T.accentMuted,border:`1px solid ${T.accentBorder}`,borderRadius:8,color:T.accent,fontSize:12,cursor:"pointer",fontFamily:"inherit",flexShrink:0,fontWeight:600}}>Restore</button>
-          </div>)}
-      </div>}
-    </div>
   </div>;
 
   // ── REVIEW ────────────────────────────────────────────────────────────────────
   const ReviewContent=()=>{
-    if(pendingTxs.length===0) return <div style={{textAlign:"center",padding:"60px 0"}}><div style={{fontSize:40,marginBottom:14}}>📋</div><p style={{margin:0,fontSize:16,color:T.textSecondary}}>Nothing to review</p></div>;
+    const [archiveOpen,setArchiveOpen]=useState(false);
+    const [skippedOpen,setSkippedOpen]=useState(false);
     const allCats=[...CATS,...FIXED_CATS];
     const toggleCat=(id,cat)=>setPendingTxs(p=>p.map(t=>t.id===id?{...t,category:cat}:t));
     const toggle=id=>setPendingTxs(p=>p.map(t=>t.id===id?{...t,checked:!t.checked}:t));
@@ -1330,98 +1343,184 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           <span style={{fontSize:12,color:T.textMuted,fontFamily:"'DM Mono'"}}>{t.date}</span>
           <select value={t.category} onChange={e=>toggleCat(t.id,e.target.value)} onClick={e=>e.stopPropagation()} style={{fontSize:12,padding:"2px 6px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:6,color:T.textSecondary,fontFamily:"inherit",cursor:"pointer"}}>{allCats.map(c=><option key={c}>{c}</option>)}</select>
           {t.habitReason&&<span style={{fontSize:11,color:T.accent,opacity:.6,fontFamily:"'DM Mono'",border:`1px solid ${T.accentBorder}`,borderRadius:5,padding:"1px 7px"}}>{t.habitReason}</span>}
-
         </div>
       </div>
       <div style={{fontFamily:"'DM Mono'",fontSize:14,fontWeight:700,color:isCredit?T.positive:dimmed?T.textMuted:T.textPrimary,flexShrink:0}}>{isCredit?"-":""}{fmt(Math.abs(t.amount))}</div>
     </div>; };
+
     return <div style={{paddingBottom:90}}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-        <div><span style={{fontSize:14,color:T.textSecondary}}>{checkedCount}/{pendingTxs.length} selected</span><span style={{marginLeft:12,fontSize:16,color:T.accent,fontFamily:"'DM Mono'",fontWeight:700}}>{fmt(pendingTxs.filter(t=>t.checked).reduce((s,t)=>s+t.amount,0))}</span></div>
-        <div style={{display:"flex",gap:10}}>
-          <button onClick={()=>setPendingTxs(p=>p.map(t=>({...t,checked:true})))} style={{padding:"7px 14px",borderRadius:9,border:`1px solid ${T.borderMid}`,background:"transparent",color:T.textSecondary,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>All</button>
-          <button onClick={()=>setPendingTxs(p=>p.map(t=>({...t,checked:false})))} style={{padding:"7px 14px",borderRadius:9,border:`1px solid ${T.borderMid}`,background:"transparent",color:T.textSecondary,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>None</button>
-        </div>
+      {/* Pending imports */}
+      {pendingTxs.length===0
+        ?<Card style={{textAlign:"center",padding:"48px 20px"}}>
+            <div style={{fontSize:44,marginBottom:14}}>📋</div>
+            <p style={{margin:"0 0 8px",fontSize:16,fontWeight:600,color:T.textSecondary}}>Nothing to review</p>
+            <p style={{margin:"0 0 20px",fontSize:14,color:T.textMuted,lineHeight:1.6}}>Import a bank statement from the Add tab and your transactions will appear here to check before saving.</p>
+            <button onClick={()=>setTab("add")} style={{padding:"12px 28px",background:T.accent,border:"none",borderRadius:12,fontFamily:"inherit",fontWeight:700,fontSize:14,color:T.accentText,cursor:"pointer"}}>Go to Add →</button>
+          </Card>
+        :<div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+            <div><span style={{fontSize:14,color:T.textSecondary}}>{checkedCount}/{pendingTxs.length} selected</span><span style={{marginLeft:12,fontSize:16,color:T.accent,fontFamily:"'DM Mono'",fontWeight:700}}>{fmt(pendingTxs.filter(t=>t.checked).reduce((s,t)=>s+t.amount,0))}</span></div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setPendingTxs(p=>p.map(t=>({...t,checked:true})))} style={{padding:"10px 16px",borderRadius:9,border:`1px solid ${T.borderMid}`,background:"transparent",color:T.textSecondary,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>All</button>
+              <button onClick={()=>setPendingTxs(p=>p.map(t=>({...t,checked:false})))} style={{padding:"10px 16px",borderRadius:9,border:`1px solid ${T.borderMid}`,background:"transparent",color:T.textSecondary,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>None</button>
+            </div>
+          </div>
+          {months.map(month=>{ const mTxs=pendingTxs.filter(t=>monthKey(t.date)===month); const allChk=mTxs.every(t=>t.checked); const normal=mTxs.filter(t=>!t.habitReason); const flagged=mTxs.filter(t=>t.habitReason);
+            return <div key={month} style={{marginBottom:20}}>
+              {isMulti&&<div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
+                <Check checked={allChk} onChange={()=>setPendingTxs(p=>p.map(t=>monthKey(t.date)===month?{...t,checked:!allChk}:t))}/>
+                <div style={{fontSize:12,fontWeight:700,color:T.accent,fontFamily:"'DM Mono'",letterSpacing:1.5,textTransform:"uppercase"}}>{monthLabel(month)}</div>
+                <div style={{flex:1,height:"1px",background:T.border}}/>
+                <div style={{fontSize:12,color:T.textMuted,fontFamily:"'DM Mono'"}}>{mTxs.filter(t=>t.checked).length}/{mTxs.length}</div>
+              </div>}
+              {normal.map(t=>renderRow(t))}
+              {flagged.length>0&&<><div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8,marginTop:10}}><span style={{fontSize:11,color:T.textMuted,fontFamily:"'DM Mono'",whiteSpace:"nowrap",letterSpacing:.5}}>USUALLY EXCLUDED ({flagged.length})</span><div style={{flex:1,height:"1px",background:T.border}}/></div>{flagged.map(t=>renderRow(t,true))}</>}
+            </div>; })}
+        </div>}
+
+      {/* Skipped transactions (archive) */}
+      <div style={{marginTop:16}}>
+        <button onClick={()=>setArchiveOpen(o=>!o)} style={{width:"100%",padding:"14px 18px",background:"transparent",border:`1px solid ${T.border}`,borderRadius:14,fontFamily:"inherit",fontSize:14,color:T.textSecondary,cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",minHeight:44}}>
+          <span style={{fontWeight:500}}>🗑 Skipped transactions <span style={{color:T.textMuted,fontWeight:400}}>({archive.length})</span></span>
+          <span style={{fontSize:13,color:T.textMuted}}>{archiveOpen?"▲":"▼"}</span>
+        </button>
+        {archiveOpen&&<div style={{marginTop:10,display:"flex",flexDirection:"column",gap:8}}>
+          {archive.length===0
+            ?<p style={{fontSize:14,color:T.textMuted,padding:"14px 0",margin:0}}>Transactions you uncheck during review appear here. You can restore them anytime.</p>
+            :archive.slice(0,60).map(t=><div key={t.id} style={{display:"flex",alignItems:"center",gap:12,background:T.surface,borderRadius:14,padding:"14px 16px",border:`1px solid ${T.border}`,minHeight:44}}>
+              <span style={{fontSize:18,flexShrink:0}}>{t.category?.split(" ")[0]||"📦"}</span>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,color:T.textSecondary,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.description}</div>
+                <div style={{fontSize:11,color:T.textMuted,fontFamily:"'DM Mono'",marginTop:2}}>{t.date} · {t.category}</div>
+              </div>
+              <div style={{fontFamily:"'DM Mono'",fontSize:13,color:T.textMuted,flexShrink:0}}>{fmt(Math.abs(t.amount))}</div>
+              <button onClick={()=>restoreToReview(t.id)} style={{padding:"8px 16px",background:T.accentMuted,border:`1px solid ${T.accentBorder}`,borderRadius:8,color:T.accent,fontSize:12,cursor:"pointer",fontFamily:"inherit",flexShrink:0,fontWeight:600,minHeight:36}}>Restore</button>
+            </div>)}
+        </div>}
       </div>
-      {months.map(month=>{ const mTxs=pendingTxs.filter(t=>monthKey(t.date)===month); const allChk=mTxs.every(t=>t.checked); const normal=mTxs.filter(t=>!t.habitReason); const dupes=[]; const flagged=mTxs.filter(t=>t.habitReason);
-        return <div key={month} style={{marginBottom:20}}>
-          {isMulti&&<div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
-            <Check checked={allChk} onChange={()=>setPendingTxs(p=>p.map(t=>monthKey(t.date)===month?{...t,checked:!allChk}:t))}/>
-            <div style={{fontSize:12,fontWeight:700,color:T.accent,fontFamily:"'DM Mono'",letterSpacing:1.5,textTransform:"uppercase"}}>{monthLabel(month)}</div>
-            <div style={{flex:1,height:"1px",background:T.border}}/>
-            <div style={{fontSize:12,color:T.textMuted,fontFamily:"'DM Mono'"}}>{mTxs.filter(t=>t.checked).length}/{mTxs.length}</div>
-          </div>}
-          {normal.map(t=>renderRow(t))}
-          {flagged.length>0&&<><div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8,marginTop:10}}><span style={{fontSize:11,color:T.textMuted,fontFamily:"'DM Mono'",whiteSpace:"nowrap",letterSpacing:.5}}>USUALLY EXCLUDED ({flagged.length})</span><div style={{flex:1,height:"1px",background:T.border}}/></div>{flagged.map(t=>renderRow(t,true))}</>}
-        </div>; })}
+
+      {/* Auto-skipped (habit memory) */}
+      <div style={{marginTop:10}}>
+        <button onClick={()=>setSkippedOpen(o=>!o)} style={{width:"100%",padding:"14px 18px",background:"transparent",border:`1px solid ${T.border}`,borderRadius:14,fontFamily:"inherit",fontSize:14,color:T.textSecondary,cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",minHeight:44}}>
+          <span style={{fontWeight:500}}>🧠 Auto-skipped <span style={{color:T.textMuted,fontWeight:400}}>({Object.keys(mf).length})</span></span>
+          <span style={{fontSize:13,color:T.textMuted}}>{skippedOpen?"▲":"▼"}</span>
+        </button>
+        {skippedOpen&&<div style={{marginTop:10}}>
+          {Object.keys(mf).length===0
+            ?<p style={{fontSize:14,color:T.textMuted,padding:"14px 0",margin:0}}>Transactions you skip repeatedly will be auto-unchecked on future imports. None yet.</p>
+            :<div style={{display:"flex",flexDirection:"column",gap:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                <p style={{margin:0,fontSize:13,color:T.textMuted}}>These are auto-unchecked when imported. Tap × to remove from memory.</p>
+                <button onClick={()=>{setEh({});setCh({});lsSave("excludeHistory",{});lsSave("catExcludeHistory",{});showToast("Auto-skipped cleared");}} style={{padding:"6px 12px",background:"transparent",border:`1px solid ${T.border}`,borderRadius:8,color:T.negative,fontSize:12,cursor:"pointer",fontFamily:"inherit",flexShrink:0,marginLeft:10}}>Clear all</button>
+              </div>
+              {Object.entries(mf).map(([desc,val])=>{
+                const tx=typeof val==="object"?val.lastTx:null;
+                const count=typeof val==="object"?val.count:val;
+                return <div key={desc} style={{display:"flex",alignItems:"center",gap:12,background:T.surface,borderRadius:14,padding:"14px 16px",border:`1px solid ${T.border}`,minHeight:44}}>
+                  <span style={{fontSize:18,flexShrink:0}}>{tx?.category?.split(" ")[0]||"📦"}</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,color:T.textSecondary,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{tx?.description||desc}</div>
+                    <div style={{fontSize:11,color:T.textMuted,fontFamily:"'DM Mono'",marginTop:2}}>
+                      {tx?.date||""}{tx?.category?` · ${tx.category}`:""}
+                      <span style={{marginLeft:8,color:T.warning,fontSize:10}}>skipped {count}×</span>
+                    </div>
+                  </div>
+                  {tx&&<div style={{fontFamily:"'DM Mono'",fontSize:13,color:T.textMuted,flexShrink:0}}>{fmt(Math.abs(tx.amount))}</div>}
+                  <button onClick={()=>{const n={...eh};delete n[desc];setEh(n);lsSave("excludeHistory",n);}} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:22,padding:"8px",flexShrink:0,lineHeight:1,minHeight:44,display:"flex",alignItems:"center"}}>×</button>
+                </div>;
+              })}
+            </div>}
+        </div>}
+      </div>
     </div>;
   };
 
   // ── MONEY ─────────────────────────────────────────────────────────────────────
-  const MoneyContent=()=><div style={{display:"flex",flexDirection:"column",gap:16}}>
-    {incTotal===0&&<div style={{background:T.info+"12",border:`1px solid ${T.info}30`,borderRadius:14,padding:"14px 18px",fontSize:14,color:T.info}}>Set up income streams in Profile to see your full breakdown.</div>}
-    <Card>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-        <SLabel style={{margin:0}}>{monthLabel(selectedMonth)}</SLabel>
-        <div style={{display:"flex",gap:8}}>
-          <button onClick={()=>exportMonthHTML(selectedMonth,profile,md,streams)} style={{padding:"6px 14px",background:"transparent",border:`1px solid ${T.border}`,borderRadius:9,color:T.textSecondary,fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:500}}>📄 PDF</button>
-          <button onClick={()=>makeShareCard(selectedMonth,profile,md,streams)} style={{padding:"6px 14px",background:"transparent",border:`1px solid ${T.border}`,borderRadius:9,color:T.textSecondary,fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:500}}>🖼 Share</button>
+  const MoneyContent=()=>{
+    const [showIncome,setShowIncome]=useState(false);
+    const [showBills,setShowBills]=useState(false);
+    const [showGoals,setShowGoals]=useState(false);
+    const [showTxs,setShowTxs]=useState(false);
+    const Section=({label,count,total,color,open,onToggle,children})=><div style={{marginBottom:4}}>
+      <button onClick={onToggle} style={{width:"100%",padding:"14px 18px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:open?`14px 14px 0 0`:"14px",fontFamily:"inherit",fontSize:14,color:T.textSecondary,cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",minHeight:44}}>
+        <span style={{fontWeight:500}}>{label}{count!==undefined&&<span style={{color:T.textMuted,fontWeight:400}}> ({count})</span>}</span>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          {total!==undefined&&<span style={{fontFamily:"'DM Mono'",fontSize:14,fontWeight:700,color:color||T.textPrimary}}>{fmt(total)}</span>}
+          <span style={{fontSize:13,color:T.textMuted}}>{open?"▲":"▼"}</span>
         </div>
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:isDesktop?"repeat(4,1fr)":"repeat(2,1fr)",gap:12,marginBottom:16}}>
-        {[["Income",incTotal,T.positive],["Fixed",fixedTotal,T.info],["Variable",varTotal,T.negative],["Saved",saved,saved>=0?T.positive:T.negative]].map(([label,val,color])=><div key={label} style={{background:T.bg,borderRadius:12,padding:"14px 16px",border:`1px solid ${T.border}`}}>
-          <div style={{fontSize:11,color:T.textMuted,marginBottom:6,letterSpacing:.5}}>{label}</div>
-          <div style={{fontSize:18,fontWeight:700,fontFamily:"'DM Mono'",color}}>{incTotal===0&&label==="Saved"?"—":fmt(val)}</div>
-        </div>)}
-      </div>
-      {incTotal>0&&<><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:13,color:T.textMuted}}>Savings rate</span><span style={{fontSize:14,fontFamily:"'DM Mono'",color:savingsRate>=20?T.positive:savingsRate>=10?T.warning:T.negative,fontWeight:700}}>{savingsRate.toFixed(1)}%</span></div><div style={{height:6,background:T.border,borderRadius:6,overflow:"hidden",marginBottom:10}}><div style={{height:"100%",width:`${Math.min(100,Math.max(0,savingsRate))}%`,background:savingsRate>=20?T.positive:savingsRate>=10?T.warning:T.negative,borderRadius:6}}/></div><div style={{height:8,borderRadius:5,overflow:"hidden",display:"flex",gap:2,marginBottom:8}}><div style={{width:`${Math.min(100,fixedTotal/incTotal*100)}%`,background:T.info,transition:"width .5s"}}/><div style={{width:`${Math.min(100,Math.abs(varTotal)/incTotal*100)}%`,background:T.negative,transition:"width .5s"}}/><div style={{flex:1,background:T.accentMuted}}/></div><div style={{display:"flex",gap:16,fontSize:12,color:T.textMuted}}><span><span style={{color:T.info}}>■</span> Fixed</span><span><span style={{color:T.negative}}>■</span> Variable</span><span><span style={{color:T.accent}}>■</span> Saved</span></div></>}
-    </Card>
-    <Card><SLabel>Income Streams</SLabel><IncomeBreakdown streams={streams} ov={ov} prevOv={prevOv} fmt={fmt} month={selectedMonth} onUpdateOv={updateOv}/></Card>
-    <Card>
-      <SLabel>Fixed Commitments</SLabel>
-      {monthFixed.length===0?<p style={{fontSize:14,color:T.textMuted,margin:0}}>Add in Profile →</p>:<div>
-        {monthFixed.map(c=><div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:`1px solid ${T.border}`}}>
-          <div><span style={{fontSize:14,color:T.textSecondary}}>{c.name}</span>{c.endMonth&&<span style={{fontSize:11,color:T.textMuted,marginLeft:8}}>until {monthLabelShort(c.endMonth)}</span>}</div>
-          <EditableAmt value={+c.amount||0} fmt={fmt} color={T.info} onSave={v=>{saveProfile({...profile,fixedCommitments:profile.fixedCommitments.map(x=>x.id===c.id?{...x,amount:v}:x)});showToast("Updated");}}/>
-        </div>)}
-        <div style={{display:"flex",justifyContent:"space-between",paddingTop:8}}><span style={{fontSize:13,color:T.textMuted}}>Total</span><span style={{fontFamily:"'DM Mono'",fontSize:15,color:T.info,fontWeight:700}}>{fmt(fixedTotal)}</span></div>
-      </div>}
-    </Card>
-    <Card>
-      <SLabel>Variable Spending</SLabel>
-      {byCat.length===0?<p style={{fontSize:14,color:T.textMuted,margin:0}}>No transactions yet</p>:<div style={{display:"flex",flexDirection:"column",gap:10}}>
-        {byCat.map(([cat,amt])=>{ const budget=profile.budgets?.[cat]; const pct=varTotal!==0?(Math.abs(amt)/Math.abs(varTotal)*100):0; const bPct=budget&&budget>0?amt/budget*100:null;
-          return <div key={cat}>
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontSize:14,color:T.textPrimary}}>{cat}</span><div style={{textAlign:"right"}}><span style={{fontFamily:"'DM Mono'",fontSize:14,color:amt<0?T.positive:T.accent,fontWeight:600}}>{amt<0?"-":""}{fmt(Math.abs(amt))}</span>{budget&&budget>0&&<span style={{fontSize:11,color:bPct>=100?T.negative:bPct>=80?T.warning:T.textMuted,fontFamily:"'DM Mono'",marginLeft:8}}>/ {fmt(budget)}</span>}</div></div>
-            <div style={{height:4,background:T.border,borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${pct}%`,background:CCOLS[cat]||T.accent,borderRadius:4}}/></div>
-            {budget&&budget>0&&<div style={{height:3,background:T.border,borderRadius:3,overflow:"hidden",marginTop:2}}><div style={{height:"100%",width:`${Math.min(100,bPct||0)}%`,background:bPct>=100?T.negative:bPct>=80?T.warning:T.info,borderRadius:3}}/></div>}
-          </div>; })}
-        <div style={{display:"flex",justifyContent:"space-between",paddingTop:8,borderTop:`1px solid ${T.border}`}}><span style={{fontSize:13,color:T.textMuted}}>Net variable</span><span style={{fontFamily:"'DM Mono'",fontSize:15,color:varTotal<0?T.positive:T.negative,fontWeight:700}}>{fmt(varTotal)}</span></div>
-      </div>}
-    </Card>
-    {profile.goals?.length>0&&<Card><SLabel>Goals</SLabel>{profile.goals.map(g=>{ const appSaved=Object.values(monthlyData).reduce((s,md)=>{ const inc=totalIncome(streams,md.incomeOverrides||{},selectedMonth); const spent=(md.txs||[]).reduce((a,t)=>a+t.amount,0); const fix=(md.fixedOverrides||profile.fixedCommitments||[]).reduce((a,c)=>a+(+c.amount||0),0); return s+Math.max(0,inc-spent-fix); },0); const ts=appSaved+(g.startingBalance||0); const pct=g.target>0?Math.min(100,ts/g.target*100):0; const daysLeft=g.date?Math.ceil((new Date(g.date)-new Date())/(1000*60*60*24)):null;
-      return <div key={g.id} style={{marginBottom:14}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:14,fontWeight:500,color:T.textPrimary}}>{g.name}</span><span style={{fontSize:13,color:T.textMuted,fontFamily:"'DM Mono'"}}>{fmt(ts)} / {fmt(g.target)}</span></div><div style={{height:6,background:T.border,borderRadius:6,overflow:"hidden",marginBottom:5}}><div style={{height:"100%",width:`${pct}%`,background:T.accent,borderRadius:6}}/></div><div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:T.textMuted}}><span>{pct.toFixed(1)}%{g.startingBalance?` (incl. ${fmt(g.startingBalance)} existing)`:""}</span>{daysLeft!=null&&<span style={{color:daysLeft<30?T.warning:T.textMuted}}>{daysLeft>0?`${daysLeft} days left`:"Past due"}</span>}</div></div>; })}</Card>}
-    <Card>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><SLabel style={{margin:0}}>Transactions ({filteredTxs.length})</SLabel>
-        {committedTxs.length>0&&<div style={{display:"flex",gap:6,overflowX:"auto"}}>
-          {["All",...Object.keys(Object.fromEntries(byCat))].map(c=><button key={c} onClick={()=>setCatFilter(c)} style={{padding:"4px 12px",borderRadius:20,border:`1px solid ${catFilter===c?T.accent:T.borderMid}`,background:catFilter===c?T.accentMuted:"transparent",color:catFilter===c?T.accent:T.textMuted,fontSize:12,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit",flexShrink:0,fontWeight:catFilter===c?600:400}}>{c==="All"?"All":c.split(" ")[0]}</button>)}
+      </button>
+      {open&&<div style={{background:T.surface,border:`1px solid ${T.border}`,borderTop:"none",borderRadius:`0 0 14px 14px`,padding:"14px 18px"}}>{children}</div>}
+    </div>;
+
+    return <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      {incTotal===0&&<div style={{background:T.info+"12",border:`1px solid ${T.info}30`,borderRadius:14,padding:"14px 18px",fontSize:14,color:T.info}}>Set up income sources in Profile to see your full breakdown.</div>}
+
+      {/* Stat cards — always visible */}
+      <Card>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <SLabel style={{margin:0}}>{monthLabel(selectedMonth)}</SLabel>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>exportMonthHTML(selectedMonth,profile,md,streams)} style={{padding:"8px 14px",background:"transparent",border:`1px solid ${T.border}`,borderRadius:9,color:T.textSecondary,fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:500,minHeight:36}}>📄 PDF</button>
+            <button onClick={()=>makeShareCard(selectedMonth,profile,md,streams)} style={{padding:"8px 14px",background:"transparent",border:`1px solid ${T.border}`,borderRadius:9,color:T.textSecondary,fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:500,minHeight:36}}>🖼 Share</button>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:isDesktop?"repeat(4,1fr)":"repeat(2,1fr)",gap:12,marginBottom:16}}>
+          {[["Income",incTotal,T.positive],["Bills",fixedTotal,T.info],["Spending",varTotal,T.negative],["Saved",saved,saved>=0?T.positive:T.negative]].map(([label,val,color])=><div key={label} style={{background:T.bg,borderRadius:12,padding:"14px 16px",border:`1px solid ${T.border}`}}>
+            <div style={{fontSize:11,color:T.textMuted,marginBottom:6,letterSpacing:.5}}>{label}</div>
+            <div style={{fontSize:18,fontWeight:700,fontFamily:"'DM Mono'",color}}>{incTotal===0&&label==="Saved"?"—":fmt(val)}</div>
+          </div>)}
+        </div>
+        {incTotal>0&&<>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:13,color:T.textMuted}}>Savings rate</span><span style={{fontSize:14,fontFamily:"'DM Mono'",color:savingsRate>=20?T.positive:savingsRate>=10?T.warning:T.negative,fontWeight:700}}>{savingsRate.toFixed(1)}%</span></div>
+          <div style={{height:6,background:T.border,borderRadius:6,overflow:"hidden",marginBottom:10}}><div style={{height:"100%",width:`${Math.min(100,Math.max(0,savingsRate))}%`,background:savingsRate>=20?T.positive:savingsRate>=10?T.warning:T.negative,borderRadius:6}}/></div>
+        </>}
+      </Card>
+
+      {/* Spending — always expanded */}
+      <Card>
+        <SLabel>Spending</SLabel>
+        {byCat.length===0?<p style={{fontSize:14,color:T.textMuted,margin:0}}>No transactions yet for {monthLabel(selectedMonth)}</p>:<div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {byCat.map(([cat,amt])=>{ const budget=profile.budgets?.[cat]; const pct=varTotal!==0?(Math.abs(amt)/Math.abs(varTotal)*100):0; const bPct=budget&&budget>0?amt/budget*100:null;
+            return <div key={cat}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontSize:14,color:T.textPrimary}}>{cat}</span><div style={{textAlign:"right"}}><span style={{fontFamily:"'DM Mono'",fontSize:14,color:amt<0?T.positive:T.accent,fontWeight:600}}>{amt<0?"-":""}{fmt(Math.abs(amt))}</span>{budget&&budget>0&&<span style={{fontSize:11,color:bPct>=100?T.negative:bPct>=80?T.warning:T.textMuted,fontFamily:"'DM Mono'",marginLeft:8}}>/ {fmt(budget)}</span>}</div></div>
+              <div style={{height:4,background:T.border,borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${pct}%`,background:CCOLS[cat]||T.accent,borderRadius:4}}/></div>
+              {budget&&budget>0&&<div style={{height:3,background:T.border,borderRadius:3,overflow:"hidden",marginTop:2}}><div style={{height:"100%",width:`${Math.min(100,bPct||0)}%`,background:bPct>=100?T.negative:bPct>=80?T.warning:T.info,borderRadius:3}}/></div>}
+            </div>; })}
+          <div style={{display:"flex",justifyContent:"space-between",paddingTop:8,borderTop:`1px solid ${T.border}`}}><span style={{fontSize:13,color:T.textMuted}}>Total spending</span><span style={{fontFamily:"'DM Mono'",fontSize:15,color:varTotal<0?T.positive:T.negative,fontWeight:700}}>{fmt(varTotal)}</span></div>
         </div>}
-      </div>
-      {filteredTxs.length===0?<p style={{fontSize:14,color:T.textMuted,margin:0}}>No transactions for {monthLabel(selectedMonth)}</p>:<div style={{display:"flex",flexDirection:"column",gap:6}}>{filteredTxs.map(t=><CompactTxRow key={t.id} tx={t} onArchive={archiveTx} onEdit={editTx} fmt={fmt} customCategories={profile.customCategories}/>)}</div>}
-    </Card>
-    <Card>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-        <SLabel style={{margin:0}}>Habit Memory</SLabel>
-        {Object.keys(mf).length>0&&<button onClick={()=>{setEh({});setCh({});lsSave("excludeHistory",{});lsSave("catExcludeHistory",{});showToast("Habits cleared");}} style={{padding:"4px 12px",background:"transparent",border:`1px solid ${T.border}`,borderRadius:8,color:T.negative,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Clear all</button>}
-      </div>
-      {Object.keys(mf).length===0?<p style={{fontSize:14,color:T.textMuted,margin:0}}>No patterns learned yet. Transactions you uncheck 2+ times will appear here.</p>:<>
-        {Object.entries(mf).map(([desc,count])=><div key={desc} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${T.border}`}}>
-          <div><div style={{fontSize:13,color:T.textPrimary,textTransform:"capitalize"}}>{desc}</div><div style={{fontSize:11,color:T.textMuted}}>excluded {count}× — auto-unchecked on import</div></div>
-          <button onClick={()=>{const n={...eh};delete n[desc];setEh(n);lsSave("excludeHistory",n);}} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:18,padding:"0 4px"}}>×</button>
-        </div>)}
-      </>}
-    </Card>
-  </div>;
+      </Card>
+
+      {/* Income sources — collapsible */}
+      <Section label="Income sources" total={incTotal} color={T.positive} open={showIncome} onToggle={()=>setShowIncome(o=>!o)}>
+        <IncomeBreakdown streams={streams} ov={ov} prevOv={prevOv} fmt={fmt} month={selectedMonth} onUpdateOv={updateOv}/>
+      </Section>
+
+      {/* Bills — collapsible */}
+      <Section label="Bills" total={fixedTotal} color={T.info} open={showBills} onToggle={()=>setShowBills(o=>!o)}>
+        {monthFixed.length===0?<p style={{fontSize:14,color:T.textMuted,margin:0}}>No bills set up. Add them in Profile →</p>:<div>
+          {monthFixed.map(c=><div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:`1px solid ${T.border}`}}>
+            <div><span style={{fontSize:14,color:T.textSecondary}}>{c.name}</span>{c.endMonth&&<span style={{fontSize:11,color:T.textMuted,marginLeft:8}}>until {monthLabelShort(c.endMonth)}</span>}</div>
+            <EditableAmt value={+c.amount||0} fmt={fmt} color={T.info} onSave={v=>{saveProfile({...profile,fixedCommitments:profile.fixedCommitments.map(x=>x.id===c.id?{...x,amount:v}:x)});showToast("Updated");}}/>
+          </div>)}
+          <div style={{display:"flex",justifyContent:"space-between",paddingTop:8}}><span style={{fontSize:13,color:T.textMuted}}>Total</span><span style={{fontFamily:"'DM Mono'",fontSize:15,color:T.info,fontWeight:700}}>{fmt(fixedTotal)}</span></div>
+        </div>}
+      </Section>
+
+      {/* Goals — collapsible */}
+      {profile.goals?.length>0&&<Section label="Goals" count={profile.goals.length} open={showGoals} onToggle={()=>setShowGoals(o=>!o)}>
+        {profile.goals.map(g=>{ const appSaved=Object.values(monthlyData).reduce((s,md)=>{ const inc=totalIncome(streams,md.incomeOverrides||{},selectedMonth); const spent=(md.txs||[]).reduce((a,t)=>a+t.amount,0); const fix=(md.fixedOverrides||profile.fixedCommitments||[]).reduce((a,c)=>a+(+c.amount||0),0); return s+Math.max(0,inc-spent-fix); },0); const ts=appSaved+(g.startingBalance||0); const pct=g.target>0?Math.min(100,ts/g.target*100):0; const daysLeft=g.date?Math.ceil((new Date(g.date)-new Date())/(1000*60*60*24)):null;
+          return <div key={g.id} style={{marginBottom:14}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:14,fontWeight:500,color:T.textPrimary}}>{g.name}</span><span style={{fontSize:13,color:T.textMuted,fontFamily:"'DM Mono'"}}>{fmt(ts)} / {fmt(g.target)}</span></div><div style={{height:6,background:T.border,borderRadius:6,overflow:"hidden",marginBottom:5}}><div style={{height:"100%",width:`${pct}%`,background:T.accent,borderRadius:6}}/></div><div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:T.textMuted}}><span>{pct.toFixed(1)}%{g.startingBalance?` (incl. ${fmt(g.startingBalance)} existing)`:""}</span>{daysLeft!=null&&<span style={{color:daysLeft<30?T.warning:T.textMuted}}>{daysLeft>0?`${daysLeft} days left`:"Past due"}</span>}</div></div>; })}
+      </Section>}
+
+      {/* Transactions — collapsible */}
+      <Section label="Transactions" count={filteredTxs.length} open={showTxs} onToggle={()=>setShowTxs(o=>!o)}>
+        {committedTxs.length>0&&<div style={{display:"flex",gap:6,overflowX:"auto",marginBottom:12,paddingBottom:4}}>
+          {["All",...Object.keys(Object.fromEntries(byCat))].map(c=><button key={c} onClick={()=>setCatFilter(c)} style={{padding:"6px 14px",borderRadius:20,border:`1px solid ${catFilter===c?T.accent:T.borderMid}`,background:catFilter===c?T.accentMuted:"transparent",color:catFilter===c?T.accent:T.textMuted,fontSize:12,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit",flexShrink:0,fontWeight:catFilter===c?600:400,minHeight:36}}>{c==="All"?"All":c.split(" ")[0]}</button>)}
+        </div>}
+        {filteredTxs.length===0?<p style={{fontSize:14,color:T.textMuted,margin:0}}>No transactions for {monthLabel(selectedMonth)}</p>:<div style={{display:"flex",flexDirection:"column",gap:6}}>{filteredTxs.map(t=><CompactTxRow key={t.id} tx={t} onArchive={archiveTx} onEdit={editTx} fmt={fmt} customCategories={profile.customCategories}/>)}</div>}
+      </Section>
+    </div>;
+  };
 
   // ── PROFILE ───────────────────────────────────────────────────────────────────
 // ╔══════════════════════════════════════════════════════════════╗
@@ -1541,9 +1640,9 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       {/* ── Theme ── */}
       <Card><ThemePresets accentColor={p.accentColor||"#C8FF57"} bgColor={p.bgColor||"#0C0C12"} onChange={(ac,bg)=>setP(x=>({...x,accentColor:ac,bgColor:bg}))}/></Card>
 
-      {/* ── Income Streams ── */}
+      {/* ── Income Sources ── */}
       <Card>
-        {sectionHead("Income Streams",addS)}
+        {sectionHead("Income sources",addS)}
         <DragList
           items={p.incomeStreams||[]}
           onReorder={list=>setP(prev=>({...prev,incomeStreams:list}))}
@@ -1572,7 +1671,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
       {/* ── Fixed Commitments ── */}
       <Card>
-        {sectionHead("Fixed Commitments",addF)}
+        {sectionHead("Bills",addF)}
         <DragList
           items={p.fixedCommitments||[]}
           onReorder={list=>setP(prev=>({...prev,fixedCommitments:list}))}
