@@ -2025,15 +2025,15 @@ ${hist}`}]})});
       </div>}
 
       {/* ── Main content area ── */}
-      <div style={{flex:1,marginLeft:isDesktop?SIDEBAR_W:0,paddingBottom:isDesktop?40:80,overflowY:"auto",minHeight:"100vh"}}>
+      <div style={{flex:1,marginLeft:isDesktop?SIDEBAR_W:0,paddingBottom:tab==="review"&&pendingTxs.length>0?(isDesktop?100:160):(isDesktop?40:80),minHeight:"100vh"}}>
         {renderContent()}
 
         {/* Review sticky commit footer */}
         {tab==="review"&&pendingTxs.length>0&&(()=>{
           const months=[...new Set(pendingTxs.filter(t=>t.checked).map(t=>monthKey(t.date)))].sort();
           const monthStr=months.length>1?`${months.length} months`:monthLabel(months[0]||selectedMonth);
-          return <div style={{position:"fixed",bottom:isDesktop?0:64,left:isDesktop?SIDEBAR_W:0,right:0,padding:"16px 24px 20px",background:`linear-gradient(transparent,${T.bg} 38%)`,zIndex:100}}>
-            <div style={{maxWidth:760,margin:"0 auto"}}>
+          return <div style={{position:"fixed",bottom:isDesktop?0:64,left:isDesktop?SIDEBAR_W:0,right:0,padding:"16px 24px 20px",background:`linear-gradient(transparent,${T.bg} 38%)`,zIndex:100,pointerEvents:"none"}}>
+            <div style={{maxWidth:760,margin:"0 auto",pointerEvents:"auto"}}>
               <Btn onClick={commitTransactions} style={{fontSize:15,padding:"14px"}}>
                 Save {checkedCount} transaction{checkedCount!==1?"s":""} → {monthStr}
               </Btn>
