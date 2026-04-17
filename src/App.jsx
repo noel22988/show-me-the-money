@@ -926,6 +926,13 @@ export default function App(){
   const [editHintSeen,setEditHintSeen]=useState(false);
   const [tutorialDismissed,setTutorialDismissed]=useState(false);
   const [catFilter,setCatFilter]=useState("All");
+  // Collapsible section states — lifted to App level so they don't reset on re-render
+  const [moneyShowIncome,setMoneyShowIncome]=useState(false);
+  const [moneyShowBills,setMoneyShowBills]=useState(false);
+  const [moneyShowGoals,setMoneyShowGoals]=useState(false);
+  const [moneyShowTxs,setMoneyShowTxs]=useState(false);
+  const [reviewArchiveOpen,setReviewArchiveOpen]=useState(false);
+  const [reviewSkippedOpen,setReviewSkippedOpen]=useState(false);
   const [restoreCandidate,setRestoreCandidate]=useState(null);
   const [showReset,setShowReset]=useState(false);
   const [showPrivacy,setShowPrivacy]=useState(false);
@@ -1084,7 +1091,8 @@ export default function App(){
 Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":"cleaned merchant name","amount":positive_number,"isCredit":boolean,"category":string}. Output ONLY the JSON array.`;
     const body=typeof content==="string"?`${prompt}\n\nStatement:\n${content}`:[...content,{type:"text",text:prompt}];
     const controller=new AbortController();
-    const timeoutId=setTimeout(()=>controller.abort(),110000);
+    // Vercel Pro plan allows up to 300s. Set client timeout slightly shorter so we get a graceful error.
+    const timeoutId=setTimeout(()=>controller.abort(),290000);
     let res;
     try{ res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:16000,messages:[{role:"user",content:body}]}),signal:controller.signal}); }
     finally{ clearTimeout(timeoutId); }
@@ -1318,7 +1326,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         <div><div style={{display:"inline-block",padding:"13px 32px",background:uploading?T.border:T.accent,color:uploading?T.textMuted:T.accentText,borderRadius:12,fontWeight:700,fontSize:15}}>{uploading?"Working…":"Choose File"}</div></div>
         {uploadMsg&&<p style={{marginTop:14,fontSize:13,color:uploadMsg.startsWith("✓")?T.positive:T.negative,margin:"14px 0 0"}}>{uploadMsg}</p>}
       </div>
-      <input ref={fileRef} type="file" accept="*/*" style={{display:"none"}} onChange={handleFile}/>
+      <input ref={fileRef} type="file" accept="application/pdf,.pdf,text/csv,.csv,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" style={{display:"none"}} onChange={handleFile}/>
     </Card>
     {/* Manual add */}
     <Card>
@@ -1329,8 +1337,8 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
   // ── REVIEW ────────────────────────────────────────────────────────────────────
   const ReviewContent=()=>{
-    const [archiveOpen,setArchiveOpen]=useState(false);
-    const [skippedOpen,setSkippedOpen]=useState(false);
+    const archiveOpen=reviewArchiveOpen; const setArchiveOpen=setReviewArchiveOpen;
+    const skippedOpen=reviewSkippedOpen; const setSkippedOpen=setReviewSkippedOpen;
     const allCats=[...CATS,...FIXED_CATS];
     const toggleCat=(id,cat)=>setPendingTxs(p=>p.map(t=>t.id===id?{...t,category:cat}:t));
     const toggle=id=>setPendingTxs(p=>p.map(t=>t.id===id?{...t,checked:!t.checked}:t));
@@ -1441,10 +1449,10 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
   // ── MONEY ─────────────────────────────────────────────────────────────────────
   const MoneyContent=()=>{
-    const [showIncome,setShowIncome]=useState(false);
-    const [showBills,setShowBills]=useState(false);
-    const [showGoals,setShowGoals]=useState(false);
-    const [showTxs,setShowTxs]=useState(false);
+    const showIncome=moneyShowIncome; const setShowIncome=setMoneyShowIncome;
+    const showBills=moneyShowBills; const setShowBills=setMoneyShowBills;
+    const showGoals=moneyShowGoals; const setShowGoals=setMoneyShowGoals;
+    const showTxs=moneyShowTxs; const setShowTxs=setMoneyShowTxs;
     const Section=({label,count,total,color,open,onToggle,children})=><div style={{marginBottom:4}}>
       <button onClick={onToggle} style={{width:"100%",padding:"14px 18px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:open?`14px 14px 0 0`:"14px",fontFamily:"inherit",fontSize:14,color:T.textSecondary,cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",minHeight:44}}>
         <span style={{fontWeight:500}}>{label}{count!==undefined&&<span style={{color:T.textMuted,fontWeight:400}}> ({count})</span>}</span>
