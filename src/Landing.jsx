@@ -83,7 +83,7 @@ function UIGallery(){
         {desc:"Found 47 transactions",done:true},
         {desc:"Categorising by merchant…",done:true},
         {desc:"Flagging recurring payments…",done:true},
-        {desc:"Detecting habits…",done:false},
+        {desc:"Ready for review",done:false},
       ].map(({desc,done},i)=>(
         <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}>
           <span style={{fontSize:12,flexShrink:0}}>{done?"✅":"⏳"}</span>
@@ -101,7 +101,7 @@ function UIGallery(){
       {[
         {desc:"KOUFU FOOD COURT",cat:"🍔 Food & Dining",amt:"S$6.80",checked:true,flag:null},
         {desc:"COMFORT DELGRO*9234",cat:"🚗 Transport",amt:"S$18.40",checked:true,flag:null},
-        {desc:"NETFLIX.COM",cat:"📱 Subscription",amt:"S$15.98",checked:false,flag:"usually excluded"},
+        {desc:"NETFLIX.COM",cat:"📱 Subscription",amt:"S$15.98",checked:false,flag:"excluded before"},
         {desc:"GRABFOOD-MCDONALDS",cat:"🍔 Food & Dining",amt:"S$23.70",checked:true,flag:null},
         {desc:"NTUC FAIRPRICE #047",cat:"🛒 Groceries",amt:"S$84.35",checked:true,flag:null},
       ].map((t,i)=>(
@@ -157,7 +157,7 @@ function UIGallery(){
         {icon:"📉",col:"#51CF66",text:"Food spending dropped S$247 vs March — your best month yet. GrabFood orders fell from 18 to 11."},
         {icon:"⚠️",col:"#FAB005",text:"Entertainment hit S$198 against a S$150 budget. Two concert tickets in one month skewed this."},
         {icon:"💡",col:"#60AAFF",text:"Your savings rate has climbed from 18% → 22% → 26% over 3 months. Strong upward trend."},
-        {icon:"🎯",col:"#C8FF57",text:"At S$1,090/month saved, your S$15,000 Emergency Fund is 5 months away."},
+        {icon:"🎯",col:"#C8FF57",text:"Your fixed commitments are 29% of income — healthy, below the 40% warning threshold."},
       ].map(({icon,col,text},i)=>(
         <div key={i} style={{display:"flex",gap:10,padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
           <span style={{fontSize:16,flexShrink:0}}>{icon}</span>
@@ -169,8 +169,8 @@ function UIGallery(){
     {label:"Goals",desc:"Track what you're saving toward",content:<>
       <div style={{marginBottom:12,fontSize:12,color:"#888898"}}>Savings goals · all time</div>
       {[
-        {name:"Emergency Fund",target:"S$15,000",saved:"S$8,420",pct:56,col:"#51CF66",eta:"5 months"},
-        {name:"Japan Trip 2026",target:"S$4,500",saved:"S$3,150",pct:70,col:"#C8FF57",eta:"2 months"},
+        {name:"Emergency Fund",target:"S$15,000",saved:"S$8,420",pct:56,col:"#51CF66",eta:"Dec 2026"},
+        {name:"Japan Trip 2026",target:"S$4,500",saved:"S$3,150",pct:70,col:"#C8FF57",eta:"Jun 2026"},
         {name:"New Laptop",target:"S$2,800",saved:"S$2,800",pct:100,col:"#60AAFF",eta:"Done ✓"},
       ].map(({name,target,saved,pct,col,eta})=>(
         <div key={name} style={{marginBottom:14}}>
@@ -295,16 +295,16 @@ function FaqItem({q,a}){
 export default function Landing({onEnter}){
   const [privacyOpen,setPrivacyOpen]=useState(false);
   const features=[
-    {icon:"📄",title:"Import any statement",body:"PDF, CSV, or photo. Claude reads your bank statement and extracts every transaction — any bank, anywhere in the world."},
+    {icon:"📄",title:"Import any statement",body:"PDF or CSV from your bank. Claude reads every transaction and extracts it all — Singapore banks tested, others should work too."},
     {icon:"🔍",title:"Review before saving",body:"Nothing gets saved until you approve it. Edit categories, catch errors, uncheck anything you don't want tracked."},
     {icon:"📊",title:"Understand your money",body:"Spending by category, savings rate, fixed vs variable, and how this month compares to last."},
-    {icon:"🤖",title:"AI insights",body:"After 3 months of data, Claude analyses your patterns and gives specific, actionable advice on what to change."},
+    {icon:"🤖",title:"AI insights",body:"After 3 full months of data (with both income and spending), Claude analyses your patterns and gives specific, actionable observations."},
     {icon:"🔒",title:"100% private by design",body:"Your data never leaves your device. No accounts, no cloud sync, no tracking. Just you and your money."},
     {icon:"💾",title:"Always backed up",body:"Auto-backup runs silently in the background. Download a full JSON backup anytime. Your data, your terms."},
   ];
   const faqs=[
     {q:"Do I need to create an account?",a:"No. The app works entirely in your browser. No accounts, no sign-ups, no passwords — ever."},
-    {q:"What banks does it support?",a:"Any bank, anywhere. Upload a PDF or CSV and Claude parses it — DBS, OCBC, UOB, Maybank, HSBC, or any other."},
+    {q:"What banks does it support?",a:"Tested with Singapore banks — DBS, OCBC, UOB, Standard Chartered, and others. If your bank provides a PDF or CSV statement, Claude can likely parse it. If it doesn't work well, tell us and we'll improve."},
     {q:"Is my financial data safe?",a:"Yes. All data is stored locally in your browser. When you import a statement, it's sent to Claude for parsing only — not stored. See our privacy policy for details."},
     {q:"What if I clear my browser?",a:"Your data will be lost — the trade-off of local-first storage. We strongly recommend downloading a backup regularly from Profile → Data & Backup."},
     {q:"What's the founding member price?",a:"We haven't set it yet — that's partly up to you. The first 200 on the waitlist get the best price we offer, locked in for life."},
@@ -371,9 +371,9 @@ export default function Landing({onEnter}){
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:14}}>
           {[
-            {n:"01",icon:"📤",title:"Upload your statement",body:"PDF, CSV, or photo. Any bank, any country. Claude handles the parsing."},
+            {n:"01",icon:"📤",title:"Upload your statement",body:"PDF or CSV from your bank. Claude handles the parsing."},
             {n:"02",icon:"✅",title:"Review and approve",body:"Check what Claude extracted. Edit categories, uncheck anything. You decide what gets saved."},
-            {n:"03",icon:"📊",title:"See your breakdown",body:"Spending by category, savings rate, month-on-month trends, and AI insights after 3 months."},
+            {n:"03",icon:"📊",title:"See your breakdown",body:"Spending by category, savings rate, vs-last-month deltas, and AI insights after 3 full months."},
           ].map(({n,icon,title,body})=>(
             <div key={n} style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:16,padding:"22px"}}>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
