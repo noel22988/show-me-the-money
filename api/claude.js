@@ -1,9 +1,8 @@
-// api/claude.js — streaming version
-// Streams Anthropic response back chunk by chunk so mobile carrier proxies
-// never see an idle connection and time out
+// api/claude.js — streaming with heartbeat keep-alive
+// Sends heartbeats every 5 seconds to prevent carrier proxy and WiFi proxy timeouts
 
 export const config = {
-  maxDuration: 300,
+  maxDuration: 300, // Vercel Pro plan supports up to 300s
   api: {
     bodyParser: {
       sizeLimit: "20mb",
@@ -27,6 +26,28 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Invalid request body" });
     }
 
+    // Start SSE stream immediately so client/proxies know connection is alive
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no"); // disable nginx buffering
+    res.flushHeaders();
+
+    // Heartbeat ticker — sends ping every 5s to keep connection alive
+    let heartbeatActive = true;
+    const heartbeat = setInterval(() => {
+      if (heartbeatActive) {
+        try {
+          res.write(`: heartbeat\n\n`); // SSE comment line, ignored by client but keeps connection alive
+        } catch (e) {
+          heartbeatActive = false;
+        }
+      }
+    }, 5000);
+
+    // Send initial ready event
+    res.write(`data: ${JSON.stringify({ status: "processing" })}\n\n`);
+
     const upstream = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -44,35 +65,34 @@ export default async function handler(req, res) {
 
     if (!upstream.ok) {
       const errText = await upstream.text();
-      return res.status(upstream.status).json({ error: "Anthropic API error", detail: errText });
+      heartbeatActive = false;
+      clearInterval(heartbeat);
+      res.write(`data: ${JSON.stringify({ error: "Anthropic API error", detail: errText, status: upstream.status })}\n\n`);
+      res.end();
+      return;
     }
-
-    // Stream SSE back to client
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.flushHeaders();
 
     const reader = upstream.body.getReader();
     const decoder = new TextDecoder();
     let fullText = "";
+    let buffer = "";
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split("\n");
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
 
       for (const line of lines) {
         if (!line.startsWith("data: ")) continue;
         const data = line.slice(6).trim();
-        if (data === "[DONE]") continue;
+        if (!data || data === "[DONE]") continue;
         try {
           const parsed = JSON.parse(data);
           if (parsed.type === "content_block_delta" && parsed.delta?.type === "text_delta") {
             fullText += parsed.delta.text;
-            // Send heartbeat chunk so connection stays alive
             res.write(`data: ${JSON.stringify({ chunk: parsed.delta.text })}\n\n`);
           }
         } catch (e) {
@@ -81,16 +101,20 @@ export default async function handler(req, res) {
       }
     }
 
-    // Send final complete response in same format as before so App.jsx works unchanged
+    heartbeatActive = false;
+    clearInterval(heartbeat);
+
+    // Send final complete response
     res.write(`data: ${JSON.stringify({ done: true, content: [{ type: "text", text: fullText }] })}\n\n`);
     res.end();
 
   } catch (err) {
     console.error("Claude API error:", err);
-    // If headers already sent (streaming started), end gracefully
     if (res.headersSent) {
-      res.write(`data: ${JSON.stringify({ error: "Stream error", detail: err.message })}\n\n`);
-      res.end();
+      try {
+        res.write(`data: ${JSON.stringify({ error: "Stream error", detail: err.message })}\n\n`);
+        res.end();
+      } catch (e) {}
     } else {
       res.status(500).json({ error: "Server error", detail: err.message });
     }
