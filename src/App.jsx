@@ -1926,7 +1926,7 @@ ${hist}`}]})});
 
   // ── Return ────────────────────────────────────────────────────────────────────
   return <ThemeCtx.Provider value={theme}>
-    <div style={{minHeight:"100vh",background:T.bg,color:T.textPrimary,fontFamily:"'DM Sans','Helvetica Neue',sans-serif",display:"flex",flexDirection:isDesktop?"row":"column"}}>
+    <div style={{minHeight:"100vh",background:T.bg,color:T.textPrimary,fontFamily:"'DM Sans','Helvetica Neue',sans-serif"}}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=DM+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
 
       {/* Global overlays */}
@@ -2025,7 +2025,7 @@ ${hist}`}]})});
       </div>}
 
       {/* ── Main content area ── */}
-      <div style={{flex:1,marginLeft:isDesktop?SIDEBAR_W:0,paddingBottom:tab==="review"&&pendingTxs.length>0?(isDesktop?100:160):(isDesktop?40:80),minHeight:"100vh"}}>
+      <div style={{marginLeft:isDesktop?SIDEBAR_W:0,paddingBottom:tab==="review"&&pendingTxs.length>0?(isDesktop?100:160):(isDesktop?40:80),minHeight:"100vh"}}>
         {renderContent()}
 
         {/* Review sticky commit footer */}
