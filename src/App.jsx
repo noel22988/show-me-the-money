@@ -949,7 +949,7 @@ export default function App(){
   const [showPrivacy,setShowPrivacy]=useState(false);
   const [fixedCommitDetected,setFixedCommitDetected]=useState(null);
   const [recurringDetected,setRecurringDetected]=useState(null);
-  const fileRef=useRef(); const restoreRef=useRef(); const backupTimer=useRef(null);
+  const fileRef=useRef(); const photoRef=useRef(); const restoreRef=useRef(); const backupTimer=useRef(null);
   const isDesktop=useMemo(()=>window.innerWidth>=768,[]);
 
   useEffect(()=>{
@@ -1364,12 +1364,15 @@ ${hist}`}]})});
       {/* Import — hero, full width */}
       <Card>
         {!uploading&&uploadStep===0
-          ?<div onClick={()=>fileRef.current.click()} onMouseEnter={e=>{e.currentTarget.style.borderColor=T.accent+"70";}} onMouseLeave={e=>{e.currentTarget.style.borderColor=T.borderMid;}} style={{border:`2px dashed ${T.borderMid}`,borderRadius:14,padding:"36px 20px",textAlign:"center",cursor:"pointer",transition:"border-color .2s"}}>
+          ?<div style={{border:`2px dashed ${T.borderMid}`,borderRadius:14,padding:"32px 20px",textAlign:"center",transition:"border-color .2s"}}>
             <div style={{fontSize:44,marginBottom:12}}>📄</div>
             <p style={{margin:"0 0 6px",fontWeight:700,fontSize:18,color:T.textPrimary}}>Upload your bank statement</p>
-            <p style={{margin:"0 0 12px",color:T.textMuted,fontSize:14,lineHeight:1.6}}>PDF, CSV, or image · Claude extracts everything · You review before saving</p>
+            <p style={{margin:"0 0 12px",color:T.textMuted,fontSize:14,lineHeight:1.6}}>Claude extracts every transaction · You review before saving</p>
             <div style={{display:"inline-flex",alignItems:"center",gap:6,background:T.warning+"18",border:`1px solid ${T.warning}40`,borderRadius:8,padding:"8px 14px",marginBottom:18}}><span style={{fontSize:14}}>📶</span><span style={{fontSize:13,color:T.warning,fontWeight:500}}>Use WiFi for best results</span></div>
-            <div><div style={{display:"inline-block",padding:"13px 32px",background:T.accent,color:T.accentText,borderRadius:12,fontWeight:700,fontSize:15}}>Choose File</div></div>
+            <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
+              <button onClick={()=>fileRef.current.click()} style={{padding:"13px 24px",background:T.accent,color:T.accentText,border:"none",borderRadius:12,fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:8,minHeight:44}}>📄 PDF or CSV</button>
+              <button onClick={()=>photoRef.current.click()} style={{padding:"13px 24px",background:"transparent",color:T.textPrimary,border:`1px solid ${T.borderMid}`,borderRadius:12,fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:8,minHeight:44}}>📷 Photo of statement</button>
+            </div>
             {uploadMsg&&<p style={{marginTop:14,fontSize:13,color:uploadMsg.startsWith("✓")?T.positive:T.negative,margin:"14px 0 0"}}>{uploadMsg}</p>}
           </div>
           :<div>
@@ -1404,7 +1407,8 @@ ${hist}`}]})});
             {uploadMsg&&uploadMsg.startsWith("⚠")&&<p style={{marginTop:14,fontSize:13,color:T.negative,margin:"14px 0 0"}}>{uploadMsg}</p>}
             <style>{`@keyframes pulsebar{0%,100%{opacity:.4}50%{opacity:1}}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
           </div>}
-        <input ref={fileRef} type="file" accept="application/pdf,.pdf,text/csv,.csv,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" style={{display:"none"}} onChange={handleFile}/>
+        <input ref={fileRef} type="file" accept=".pdf,.csv,application/pdf,text/csv" style={{display:"none"}} onChange={handleFile}/>
+        <input ref={photoRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleFile}/>
       </Card>
       {/* Manual add */}
       <Card>
