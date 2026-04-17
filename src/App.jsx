@@ -469,11 +469,19 @@ function ManualAddForm({onAdd,categories,defaultDate}){
 
 function InsightCards({text}){
   const T=useTheme(); if(!text) return null;
-  const items=text.split(/\n+/).filter(l=>l.trim()).map(l=>l.replace(/^\d+[\.\)]\s*/,"").replace(/^[-•]\s*/,"").trim()).filter(Boolean);
-  return <div style={{display:"flex",flexDirection:"column",gap:10}}>
-    {items.map((item,i)=><div key={i} style={{background:T.surface2,borderRadius:12,padding:"14px 16px",border:`1px solid ${T.border}`,display:"flex",gap:12}}>
-      <span style={{fontSize:11,color:T.accent,fontFamily:"'DM Mono'",fontWeight:700,flexShrink:0,marginTop:2}}>{String(i+1).padStart(2,"0")}</span>
-      <span style={{fontSize:14,color:T.textSecondary,lineHeight:1.65}}>{item}</span>
+  // Match lines starting with relevant emojis; fallback for un-prefixed lines
+  const EMOJI_RE=/^([📉⚠💡🎯📈🔴🟢✅⏰📊🏆]\uFE0F?)\s*/;
+  const items=text.split(/\n+/).map(l=>l.trim()).filter(Boolean).map(l=>{
+    const clean=l.replace(/^\d+[\.\)]\s*/,"").replace(/^[-•]\s*/,"").trim();
+    const m=clean.match(EMOJI_RE);
+    if(m) return {icon:m[1],text:clean.slice(m[0].length).trim()};
+    return {icon:"💡",text:clean};
+  }).filter(x=>x.text);
+  const iconCol={"📉":T.positive,"📈":T.warning,"⚠️":T.warning,"⚠":T.warning,"💡":T.info,"🎯":T.accent,"✅":T.positive,"🔴":T.negative,"🟢":T.positive};
+  return <div style={{display:"flex",flexDirection:"column",gap:8}}>
+    {items.map((item,i)=><div key={i} style={{display:"flex",gap:12,padding:"12px 14px",background:T.surface2,borderRadius:12,border:`1px solid ${T.border}`,alignItems:"flex-start"}}>
+      <span style={{fontSize:18,flexShrink:0,lineHeight:1.3}}>{item.icon}</span>
+      <span style={{fontSize:13,color:T.textSecondary,lineHeight:1.6}}>{item.text}</span>
     </div>)}
   </div>;
 }
@@ -918,6 +926,9 @@ export default function App(){
   const [pendingTxs,setPendingTxs]=useState([]);
   const [uploading,setUploading]=useState(false);
   const [uploadMsg,setUploadMsg]=useState("");
+  const [uploadStep,setUploadStep]=useState(0); // 0=idle, 1=reading, 2=claude, 3=categorising, 4=ready
+  const [uploadFile,setUploadFile]=useState(null); // {name, size}
+  const [uploadTxCount,setUploadTxCount]=useState(0);
   const [form,setForm]=useState({date:todayStr(),description:"",category:BUILTIN_CATEGORIES[0],amount:""});
   const [insights,setInsights]=useState({text:"",timestamp:null});
   const [loadingInsights,setLoadingInsights]=useState(false);
@@ -1119,23 +1130,29 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
   const handleFile=async e=>{
     const file=e.target.files[0]; if(!file) return;
-    setUploading(true); setUploadMsg("Reading file…");
+    setUploading(true); setUploadMsg("");
+    setUploadFile({name:file.name,size:file.size});
+    setUploadStep(1); // reading file
+    setUploadTxCount(0);
     try{
-      // duplicate detection removed
       let parsed=[];
       const isImage=/^image\//i.test(file.type); const isPDF=file.name.toLowerCase().endsWith(".pdf");
       if(isImage||isPDF){
         const base64=await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(",")[1]); r.onerror=rej; r.readAsDataURL(file); });
-        setUploadMsg("Claude is parsing your statement…");
+        setUploadStep(2); // claude reading
         parsed=await parseChunk([{type:"document",source:{type:"base64",media_type:isImage?file.type:"application/pdf",data:base64}}]);
       } else {
         const text=await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsText(file); });
+        setUploadStep(2);
         const chunks=splitCSV(text,15000);
-        for(let i=0;i<chunks.length;i++){ setUploadMsg(`Parsing part ${i+1} of ${chunks.length}…`); parsed=[...parsed,...await parseChunk(chunks[i])]; }
+        for(let i=0;i<chunks.length;i++){ parsed=[...parsed,...await parseChunk(chunks[i])]; }
       }
       if(!Array.isArray(parsed)||!parsed.length) throw new Error("No transactions found in statement");
+      setUploadStep(3); // categorising
+      setUploadTxCount(parsed.length);
       const seen=new Set(); parsed=parsed.filter(t=>{ const k=`${t.date}|${(t.description||"").toLowerCase()}|${Math.abs(parseFloat(t.amount)||0)}`; if(seen.has(k)) return false; seen.add(k); return true; });
       const fixedDetected=[];
+      const nonce=Date.now()+Math.random();
       const imported=parsed.map((t,i)=>{
         const isCredit=!!t.isCredit;
         const amount=isCredit?-(Math.abs(parseFloat(t.amount)||0)):Math.abs(parseFloat(t.amount)||0);
@@ -1143,33 +1160,36 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         const cat=validCats.includes(t.category)?t.category:"📦 Other";
         if(isFixedCat(cat)&&!isCredit){
           fixedDetected.push({
-            id:`fd${Date.now()}${i}`,
+            id:`fd${nonce}${i}`,
             description:t.description||"Unknown",
             category:cat,
             rawAmount:Math.abs(amount),
             date:t.date||todayStr(),
-            // keep full tx so we can put it back if user skips
-            fullTx:{id:Date.now()+i+10000,date:t.date||todayStr(),description:t.description||"Unknown",amount,category:cat,source:"imported",checked:false,habitReason:null}
+            fullTx:{id:`${nonce}${i}f`,date:t.date||todayStr(),description:t.description||"Unknown",amount,category:cat,source:"imported",checked:false,habitReason:null}
           });
           return null;
         }
         const reason=habitReason({description:(t.description||"").toLowerCase().trim(),category:cat},mf,cf);
-        return {id:Date.now()+i,date:t.date||todayStr(),description:t.description||"Unknown",amount,category:cat,source:"imported",checked:!reason,habitReason:reason};
+        return {id:`${nonce}${i}`,date:t.date||todayStr(),description:t.description||"Unknown",amount,category:cat,source:"imported",checked:!reason,habitReason:reason};
       }).filter(Boolean);
-      // Unchecked recurring transactions stay in pending (not removed)
-      setPendingTxs(imported);
+      // Append to pending (not replace) — so multi-part uploads accumulate
+      setPendingTxs(p=>[...p,...imported]);
       if(fixedDetected.length>0) setFixedCommitDetected(fixedDetected);
+      setUploadStep(4); // ready for review
+      setUploadTxCount(imported.length);
       const months=[...new Set(imported.map(t=>monthKey(t.date)))].sort();
       setUploadMsg(`✓ Found ${imported.length} transactions across ${months.length} month${months.length>1?"s":""}`);
-      setTab("review");
+      // Small delay so user sees "Ready for review" before navigation
+      setTimeout(()=>setTab("review"),700);
     }catch(err){
       console.error(err); const msg=err.message||"Unknown error";
-      if(msg.includes("504")||msg.includes("timeout")) setUploadMsg("⚠ Timed out. Try a smaller file.");
+      setUploadStep(0);
+      if(msg.includes("504")||msg.includes("timeout")||msg.includes("aborted")) setUploadMsg("⚠ Timed out. Try a smaller file or better connection.");
       else if(msg.includes("API key")) setUploadMsg("⚠ API key not configured.");
       else if(msg.includes("No transactions")) setUploadMsg("⚠ No transactions found. Check the file.");
-      else setUploadMsg(`⚠ ${msg} [${err.name}]`);
+      else setUploadMsg(`⚠ ${msg}`);
     }
-    finally{ setUploading(false); e.target.value=""; setTimeout(()=>setUploadMsg(""),12000); }
+    finally{ setUploading(false); e.target.value=""; setTimeout(()=>{setUploadMsg("");setUploadStep(0);setUploadFile(null);},8000); }
   };
 
   const handleFixedCommitConfirm=confirmed=>{
@@ -1190,7 +1210,18 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     if(fullMonths<3) return; setLoadingInsights(true);
     try{
       const hist=Object.entries(monthlyData).filter(([m])=>!profile?.startMonth||m>=profile.startMonth).sort().map(([month,md])=>{ const txs=md.txs||[]; const inc=totalIncome(streams,md.incomeOverrides||{},month); const total=txs.reduce((s,t)=>s+t.amount,0); const byCat={}; txs.forEach(t=>{byCat[t.category]=(byCat[t.category]||0)+t.amount;}); return `${month} | Income: ${inc} | Spending: ${total.toFixed(2)} | Saved: ${(inc-total).toFixed(2)}\n${Object.entries(byCat).map(([c,a])=>`  ${c}: ${a.toFixed(2)}`).join("\n")}`; }).join("\n\n");
-      const res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1200,messages:[{role:"user",content:`You are a personal finance advisor for a Singapore user. Analyse this spending and income data. Give 5-6 specific, actionable insights using actual numbers. Be direct and friendly. Each insight on a separate line.\n\n${hist}`}]})});
+      const res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1200,messages:[{role:"user",content:`You are a personal finance advisor for a Singapore user. Analyse this spending and income data.
+
+Return EXACTLY 4-5 insights, each on its own line, each starting with ONE of these emojis:
+📉 — a spending trend (up or down) vs previous months
+⚠️ — a budget or overspending warning
+💡 — a positive pattern or savings rate observation
+🎯 — a projection, ratio, or benchmark comparison
+
+Format each line as: EMOJI [insight with specific numbers]
+Use actual dollar amounts from the data. Be concise — one sentence per line. No preamble, no numbering, no bullets, no markdown. Just the 4-5 lines.
+
+${hist}`}]})});
       if(!res.ok) throw new Error(`Server error ${res.status}`);
       const reader=res.body.getReader(); const dec=new TextDecoder(); let finalData=null;
       while(true){ const {done,value}=await reader.read(); if(done) break; const text=dec.decode(value,{stream:true}); for(const line of text.split("\n")){ if(!line.startsWith("data: ")) continue; const d=line.slice(6).trim(); if(!d) continue; try{ const p=JSON.parse(d); if(p.done&&p.content) finalData=p; }catch(e){} } }
@@ -1290,9 +1321,16 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       <Card><SLabel>6-Month Overview</SLabel><SixMonthChart monthlyData={monthlyData} incomeStreams={streams} selectedMonth={selectedMonth} startMonth={profile.startMonth} fixedCommitments={profile.fixedCommitments}/></Card>
       {/* Insights */}
       <Card>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:insights.text?14:0}}>
-          <div><SLabel style={{margin:"0 0 4px"}}>Claude Insights</SLabel><p style={{margin:0,fontSize:12,color:fullMonths>=3?T.positive:T.textMuted}}>{fullMonths}/3 months {fullMonths>=3?"✓":"— unlocks after 3 full months"}</p>{insights.timestamp&&<p style={{margin:"4px 0 0",fontSize:11,color:T.textMuted}}>Last: {new Date(insights.timestamp).toLocaleDateString("en-SG",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</p>}</div>
-          <button onClick={generateInsights} disabled={loadingInsights||fullMonths<3} style={{padding:"7px 14px",background:fullMonths>=3?T.accentMuted:"transparent",border:`1px solid ${fullMonths>=3?T.accentBorder:T.border}`,borderRadius:10,color:fullMonths>=3?T.accent:T.textMuted,fontSize:12,fontFamily:"inherit",cursor:fullMonths<3?"default":"pointer",fontWeight:600,flexShrink:0}}>{loadingInsights?"Analysing…":insights.text?"↻ Refresh":"Generate"}</button>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:insights.text?14:0,gap:10,flexWrap:"wrap"}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+              <SLabel style={{margin:0}}>Claude Insights</SLabel>
+              <span style={{fontSize:10,fontFamily:"'DM Mono'",color:fullMonths>=3?T.accent:T.textMuted,background:fullMonths>=3?T.accentMuted:"transparent",border:`1px solid ${fullMonths>=3?T.accentBorder:T.border}`,borderRadius:10,padding:"2px 8px",fontWeight:600}}>{fullMonths} month{fullMonths===1?"":"s"} data</span>
+            </div>
+            <p style={{margin:0,fontSize:12,color:fullMonths>=3?T.positive:T.textMuted}}>{fullMonths>=3?"Ready to analyse":`Unlocks after 3 full months (${3-fullMonths} to go)`}</p>
+            {insights.timestamp&&<p style={{margin:"4px 0 0",fontSize:11,color:T.textMuted}}>Last: {new Date(insights.timestamp).toLocaleDateString("en-SG",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</p>}
+          </div>
+          <button onClick={generateInsights} disabled={loadingInsights||fullMonths<3} style={{padding:"8px 14px",background:fullMonths>=3?T.accentMuted:"transparent",border:`1px solid ${fullMonths>=3?T.accentBorder:T.border}`,borderRadius:10,color:fullMonths>=3?T.accent:T.textMuted,fontSize:12,fontFamily:"inherit",cursor:fullMonths<3?"default":"pointer",fontWeight:600,flexShrink:0,minHeight:36}}>{loadingInsights?"Analysing…":insights.text?"↻ Refresh":"Generate"}</button>
         </div>
         {insights.text?<InsightCards text={insights.text}/>:fullMonths>=3&&<p style={{fontSize:13,color:T.textMuted,margin:"10px 0 0"}}>Tap Generate to analyse your patterns.</p>}
       </Card>
@@ -1315,25 +1353,66 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
   };
 
   // ── ADD ───────────────────────────────────────────────────────────────────────
-  const AddContent=()=><div style={{display:"flex",flexDirection:"column",gap:16}}>
-    {/* Import — hero, full width */}
-    <Card>
-      <div onClick={()=>!uploading&&fileRef.current.click()} onMouseEnter={e=>{if(!uploading)e.currentTarget.style.borderColor=T.accent+"70";}} onMouseLeave={e=>{e.currentTarget.style.borderColor=T.borderMid;}} style={{border:`2px dashed ${T.borderMid}`,borderRadius:14,padding:"36px 20px",textAlign:"center",cursor:uploading?"default":"pointer",transition:"border-color .2s"}}>
-        <div style={{fontSize:44,marginBottom:12}}>{uploading?"⏳":"📄"}</div>
-        <p style={{margin:"0 0 6px",fontWeight:700,fontSize:18,color:T.textPrimary}}>{uploading?"Importing…":"Upload your bank statement"}</p>
-        <p style={{margin:"0 0 12px",color:T.textMuted,fontSize:14,lineHeight:1.6}}>PDF, CSV, or image · Any bank · Claude extracts everything · You review before saving</p>
-        <div style={{display:"inline-flex",alignItems:"center",gap:6,background:T.warning+"18",border:`1px solid ${T.warning}40`,borderRadius:8,padding:"8px 14px",marginBottom:18}}><span style={{fontSize:14}}>📶</span><span style={{fontSize:13,color:T.warning,fontWeight:500}}>Use WiFi for best results</span></div>
-        <div><div style={{display:"inline-block",padding:"13px 32px",background:uploading?T.border:T.accent,color:uploading?T.textMuted:T.accentText,borderRadius:12,fontWeight:700,fontSize:15}}>{uploading?"Working…":"Choose File"}</div></div>
-        {uploadMsg&&<p style={{marginTop:14,fontSize:13,color:uploadMsg.startsWith("✓")?T.positive:T.negative,margin:"14px 0 0"}}>{uploadMsg}</p>}
-      </div>
-      <input ref={fileRef} type="file" accept="application/pdf,.pdf,text/csv,.csv,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" style={{display:"none"}} onChange={handleFile}/>
-    </Card>
-    {/* Manual add */}
-    <Card>
-      <SLabel>Add manually</SLabel>
-      <ManualAddForm categories={CATS} defaultDate={todayStr()} onAdd={addManual}/>
-    </Card>
-  </div>;
+  const AddContent=()=>{
+    const STEPS=[
+      {id:1,label:"Reading file"},
+      {id:2,label:"Claude is reading your statement"},
+      {id:3,label:uploadTxCount>0?`Categorising ${uploadTxCount} transactions`:"Categorising by merchant"},
+      {id:4,label:"Ready for review"},
+    ];
+    return <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {/* Import — hero, full width */}
+      <Card>
+        {!uploading&&uploadStep===0
+          ?<div onClick={()=>fileRef.current.click()} onMouseEnter={e=>{e.currentTarget.style.borderColor=T.accent+"70";}} onMouseLeave={e=>{e.currentTarget.style.borderColor=T.borderMid;}} style={{border:`2px dashed ${T.borderMid}`,borderRadius:14,padding:"36px 20px",textAlign:"center",cursor:"pointer",transition:"border-color .2s"}}>
+            <div style={{fontSize:44,marginBottom:12}}>📄</div>
+            <p style={{margin:"0 0 6px",fontWeight:700,fontSize:18,color:T.textPrimary}}>Upload your bank statement</p>
+            <p style={{margin:"0 0 12px",color:T.textMuted,fontSize:14,lineHeight:1.6}}>PDF, CSV, or image · Claude extracts everything · You review before saving</p>
+            <div style={{display:"inline-flex",alignItems:"center",gap:6,background:T.warning+"18",border:`1px solid ${T.warning}40`,borderRadius:8,padding:"8px 14px",marginBottom:18}}><span style={{fontSize:14}}>📶</span><span style={{fontSize:13,color:T.warning,fontWeight:500}}>Use WiFi for best results</span></div>
+            <div><div style={{display:"inline-block",padding:"13px 32px",background:T.accent,color:T.accentText,borderRadius:12,fontWeight:700,fontSize:15}}>Choose File</div></div>
+            {uploadMsg&&<p style={{marginTop:14,fontSize:13,color:uploadMsg.startsWith("✓")?T.positive:T.negative,margin:"14px 0 0"}}>{uploadMsg}</p>}
+          </div>
+          :<div>
+            {/* File info card with pulsing progress bar */}
+            {uploadFile&&<div style={{padding:"14px 16px",background:T.accentMuted,border:`1px solid ${T.accentBorder}`,borderRadius:12,marginBottom:16}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+                <span style={{fontSize:20,flexShrink:0}}>📄</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:600,color:T.textPrimary,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{uploadFile.name}</div>
+                  <div style={{fontSize:11,color:T.textMuted}}>{(uploadFile.size/1024/1024).toFixed(1)} MB · {uploadStep<4?"Processing…":"Done"}</div>
+                </div>
+              </div>
+              <div style={{height:4,background:"rgba(255,255,255,0.08)",borderRadius:3,overflow:"hidden",position:"relative"}}>
+                <div style={{position:"absolute",inset:0,background:T.accent,borderRadius:3,animation:uploadStep<4?"pulsebar 1.4s ease-in-out infinite":"none",width:uploadStep===4?"100%":"60%"}}/>
+              </div>
+            </div>}
+            {/* Step checklist */}
+            <div style={{fontSize:12,color:T.textMuted,fontFamily:"'DM Mono'",marginBottom:10}}>
+              {uploadStep===4?"All done — opening review…":uploadStep===3?"Organising your transactions…":uploadStep===2?"Claude is reading your statement…":"Reading file…"}
+            </div>
+            {STEPS.map(s=>{
+              const done=uploadStep>s.id;
+              const active=uploadStep===s.id;
+              const pending=uploadStep<s.id;
+              return <div key={s.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:`1px solid ${T.border}`}}>
+                <span style={{fontSize:14,flexShrink:0,width:20,display:"flex",justifyContent:"center"}}>
+                  {done?"✅":active?<span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>⏳</span>:"⏳"}
+                </span>
+                <span style={{fontSize:13,color:done?T.textMuted:active?T.textPrimary:T.textMuted,fontWeight:active?600:400,opacity:pending?0.5:1}}>{s.label}</span>
+              </div>;
+            })}
+            {uploadMsg&&uploadMsg.startsWith("⚠")&&<p style={{marginTop:14,fontSize:13,color:T.negative,margin:"14px 0 0"}}>{uploadMsg}</p>}
+            <style>{`@keyframes pulsebar{0%,100%{opacity:.4}50%{opacity:1}}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+          </div>}
+        <input ref={fileRef} type="file" accept="application/pdf,.pdf,text/csv,.csv,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" style={{display:"none"}} onChange={handleFile}/>
+      </Card>
+      {/* Manual add */}
+      <Card>
+        <SLabel>Add manually</SLabel>
+        <ManualAddForm categories={CATS} defaultDate={todayStr()} onAdd={addManual}/>
+      </Card>
+    </div>;
+  };
 
   // ── REVIEW ────────────────────────────────────────────────────────────────────
   const ReviewContent=()=>{
