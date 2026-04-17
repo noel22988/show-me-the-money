@@ -601,11 +601,11 @@ function PinScreen({storedHash,onUnlock,onSetup,onSkip}){
 
 // ── Modals ────────────────────────────────────────────────────────────────────
 function Overlay({children,onClose,zIndex=700}){
-  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",zIndex,display:"flex",alignItems:"center",justifyContent:"center",padding:24}} onClick={onClose}>
-    <div onClick={e=>e.stopPropagation()}>{children}</div>
+  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",zIndex,display:"flex",alignItems:"center",justifyContent:"center",padding:24,overflowY:"auto"}} onClick={onClose}>
+    <div onClick={e=>e.stopPropagation()} style={{maxWidth:"100%",maxHeight:"100%",display:"flex"}}>{children}</div>
   </div>;
 }
-function ModalCard({children,maxWidth=360}){ const T=useTheme(); return <div style={{background:T.surface,borderRadius:20,padding:24,width:"100%",maxWidth,boxShadow:"0 24px 80px rgba(0,0,0,0.4)"}}>{children}</div>; }
+function ModalCard({children,maxWidth=360}){ const T=useTheme(); return <div style={{background:T.surface,borderRadius:20,padding:24,width:"100%",maxWidth,maxHeight:"calc(100vh - 48px)",overflowY:"auto",boxShadow:"0 24px 80px rgba(0,0,0,0.4)",WebkitOverflowScrolling:"touch"}}>{children}</div>; }
 
 function RestoreModal({backup,onConfirm,onClose}){
   const T=useTheme(); const txCount=countAllTx(backup.monthlyData||{}); const moCount=Object.keys(backup.monthlyData||{}).length;
