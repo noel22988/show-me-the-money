@@ -1,3 +1,9 @@
+// ════════════════════════════════════════════════════════════════════════════
+// ═══ PART 1 OF 3 ═══  App.jsx — Show Me The Money
+// ═══ Paste Part 1 + Part 2 + Part 3 end-to-end into a single App.jsx
+// ═══ Includes: Calm theme defaults + Variable-Income input fix
+// ════════════════════════════════════════════════════════════════════════════
+
 import { useState, useMemo, useRef, useEffect, useCallback, createContext, useContext } from "react";
 import { PrivacyModal } from "./Landing.jsx";
 
@@ -11,8 +17,22 @@ const CURRENCY_SYMBOLS = {"SGD":"S$","USD":"$","MYR":"RM","AUD":"A$","GBP":"£",
 const MAX_AUTO_BACKUPS = 7;
 const APP_VERSION = "3.1";
 const SIDEBAR_W = 260;
-const DARK_PRESETS = [{name:"Midnight",accent:"#C8FF57",bg:"#0C0C12"},{name:"Ocean",accent:"#60AAFF",bg:"#0A1628"},{name:"Noir",accent:"#FF6B9D",bg:"#1A0812"}];
-const LIGHT_PRESETS = [{name:"Slate",accent:"#5C5FEF",bg:"#F0F2F5"},{name:"Sage",accent:"#2D7D4F",bg:"#F2F5F0"},{name:"Sand",accent:"#C45E00",bg:"#FAF5EE"}];
+
+// ── CALM THEME — new defaults (indigo on cream) ─────────────────────────────
+// Light presets come first; "Calm" is the new first-run default.
+// Original lime-on-black is preserved as "Midnight" so power users can still pick it.
+const LIGHT_PRESETS = [
+  {name:"Calm",   accent:"#5C5FEF", bg:"#F7F4ED"}, // ← NEW DEFAULT
+  {name:"Mist",   accent:"#3D7B8C", bg:"#F2F4F5"},
+  {name:"Linen",  accent:"#9C5A3C", bg:"#FAF5EE"},
+];
+const DARK_PRESETS = [
+  {name:"Dusk",     accent:"#A8A6FF", bg:"#16161E"},
+  {name:"Midnight", accent:"#C8FF57", bg:"#0C0C12"}, // your original
+  {name:"Forest",   accent:"#8FD9A8", bg:"#0E1614"},
+];
+const CALM_DEFAULT_ACCENT = "#5C5FEF";
+const CALM_DEFAULT_BG     = "#F7F4ED";
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 const todayStr = () => new Date().toISOString().split("T")[0];
@@ -28,14 +48,16 @@ const DEFAULT_PROFILE = {
   name:"",occupation:"",currency:"SGD",avatar:"",
   incomeStreams:[],fixedCommitments:[],goals:[],
   customCategories:[],budgets:{},
-  onboarded:false,accentColor:"#C8FF57",bgColor:"#0C0C12",
+  onboarded:false,
+  accentColor: CALM_DEFAULT_ACCENT,
+  bgColor:     CALM_DEFAULT_BG,
   startMonth:currentMonth()
 };
 
 // ── Storage ───────────────────────────────────────────────────────────────────
 function lsLoad(k){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch{ return null; } }
 function lsSave(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){ console.error(e); } }
-function lsClear(){ ["profile","monthlyData","excludeHistory","catExcludeHistory","insights","autoBackups","editHintSeen","archive","pinHash"].forEach(k=>{ try{localStorage.removeItem(k);}catch(e){} }); }
+function lsClear(){ ["profile","monthlyData","excludeHistory","catExcludeHistory","insights","autoBackups","editHintSeen","archive","pinHash","tutorialDismissed"].forEach(k=>{ try{localStorage.removeItem(k);}catch(e){} }); }
 function hashPin(pin){ let h=0; for(let i=0;i<pin.length;i++){h=((h<<5)-h)+pin.charCodeAt(i);h|=0;} return h.toString(36); }
 
 // ── Colour engine ─────────────────────────────────────────────────────────────
@@ -47,7 +69,7 @@ function isLight(hex){ return luminance(hexToRgb(hex))>0.25; }
 function mixHex(hex,target,pct){ const a=hexToRgb(hex),b=hexToRgb(target); return rgbToHex(a.r+(b.r-a.r)*pct,a.g+(b.g-a.g)*pct,a.b+(b.b-a.b)*pct); }
 function ensureContrast(accent,bg,minRatio=3.5){ let hex=accent,a=hexToRgb(hex),itr=0; while(contrastRatio(a,hexToRgb(bg))<minRatio&&itr<24){hex=isLight(bg)?mixHex(hex,"#000000",0.1):mixHex(hex,"#ffffff",0.1);a=hexToRgb(hex);itr++;} return {hex}; }
 function buildTheme(accentRaw,bgRaw){
-  const bg=bgRaw||"#0C0C12"; const {hex:accent}=ensureContrast(accentRaw||"#C8FF57",bg); const light=isLight(bg);
+  const bg=bgRaw||CALM_DEFAULT_BG; const {hex:accent}=ensureContrast(accentRaw||CALM_DEFAULT_ACCENT,bg); const light=isLight(bg);
   const surface=light?mixHex(bg,"#000000",0.07):mixHex(bg,"#ffffff",0.07);
   const surface2=light?mixHex(bg,"#000000",0.04):mixHex(bg,"#ffffff",0.04);
   const border=light?mixHex(bg,"#000000",0.14):mixHex(bg,"#ffffff",0.1);
@@ -59,7 +81,7 @@ function buildTheme(accentRaw,bgRaw){
   const cardShadow=light?"0 2px 10px rgba(0,0,0,0.08)":"0 2px 10px rgba(0,0,0,0.3)";
   return {bg,surface,surface2,border,borderMid,accent,accentText,accentMuted:accent+"22",accentBorder:accent+"44",positive,negative,warning,info,textPrimary,textSecondary,textMuted,bgLight:light,cardShadow};
 }
-const ThemeCtx = createContext(buildTheme("#C8FF57","#0C0C12"));
+const ThemeCtx = createContext(buildTheme(CALM_DEFAULT_ACCENT, CALM_DEFAULT_BG));
 const useTheme = () => useContext(ThemeCtx);
 
 // ── Category helpers ──────────────────────────────────────────────────────────
@@ -86,13 +108,18 @@ function totalIncome(streams,ov,month){
 function pendingVarStreams(streams,ov,month){
   return getMonthStreams(streams,ov,month).filter(({stream,amount})=>(stream.type==="variable"||stream.type==="oneoff")&&amount===null);
 }
+// All variable + oneoff streams for the month, regardless of whether they've been entered yet.
+// Used by the new VarIncomeEntry so users can EDIT entries (not just enter once and lose access).
+function allVarStreams(streams,ov,month){
+  return getMonthStreams(streams,ov,month).filter(({stream})=>stream.type==="variable"||stream.type==="oneoff");
+}
 
 // ── Habit helpers ─────────────────────────────────────────────────────────────
-const HABIT_THRESHOLD = 1; // show in habit memory after being unchecked just once
+const HABIT_THRESHOLD = 1;
 function habitFlags(eh,ch){
   const mf={},cf={};
   for(const [k,v] of Object.entries(eh||{})){
-    const count=typeof v==="object"?v.count:v; // handle old format
+    const count=typeof v==="object"?v.count:v;
     if(count>=HABIT_THRESHOLD) mf[k]=v;
   }
   for(const [k,v] of Object.entries(ch||{})) if(v>=HABIT_THRESHOLD) cf[k]=v;
@@ -155,7 +182,7 @@ function makeShareCard(month,profile,md,streams){
   const byCat={}; txs.forEach(t=>{byCat[t.category]=(byCat[t.category]||0)+t.amount;});
   const topCat=Object.entries(byCat).sort((a,b)=>b[1]-a[1])[0];
   const sym=CURRENCY_SYMBOLS[profile?.currency||"SGD"]; const f=n=>sym+Math.abs(n).toLocaleString("en-SG",{minimumFractionDigits:2,maximumFractionDigits:2});
-  const accent=profile?.accentColor||"#C8FF57"; const bg=profile?.bgColor||"#0C0C12"; const tc=isLight(bg)?"#111118":"#EEEAE0";
+  const accent=profile?.accentColor||CALM_DEFAULT_ACCENT; const bg=profile?.bgColor||CALM_DEFAULT_BG; const tc=isLight(bg)?"#111118":"#EEEAE0";
   const canvas=document.createElement("canvas"); canvas.width=960; canvas.height=520; const ctx=canvas.getContext("2d");
   ctx.fillStyle=bg; ctx.fillRect(0,0,960,520);
   ctx.fillStyle=accent+"18"; ctx.fillRect(0,0,960,520);
@@ -201,7 +228,6 @@ function Toast({msg,onDone}){ const T=useTheme(); useEffect(()=>{const t=setTime
 // ── LogoAnimation — typewriter logo ↔ "you've saved X since we started" ───────
 function LogoAnimation({allTimeSaved,fmt,compact}){
   const T=useTheme();
-  // phases: "typing-show" → "typing-money" → "hold-logo" → "fade-out-logo" → "counting" → "hold-number" → "fade-out-number" → repeat
   const LOGO_LINE1="$how Me";
   const LOGO_LINE2=compact?"The Money":" The Money";
   const FULL_LOGO=compact?"$how Me The Money":null;
@@ -237,31 +263,24 @@ function LogoAnimation({allTimeSaved,fmt,compact}){
 
     const cycle=()=>{
       if(cancelled) return;
-      // Phase 1: type logo
       setPhase("logo"); setTyped(""); setOpacity(1);
       runTypewriter(fullText,()=>{
         if(cancelled) return;
-        // Phase 2: hold logo
         timerRef.current=setTimeout(()=>{
           if(cancelled) return;
           if(!hasData){
-            // no data — just fade and retype
             setOpacity(0);
             timerRef.current=setTimeout(()=>{ if(!cancelled) cycle(); },400);
             return;
           }
-          // Phase 3: fade out logo
           setOpacity(0);
           timerRef.current=setTimeout(()=>{
             if(cancelled) return;
-            // Phase 4: count up number
             setPhase("number"); setOpacity(1); setCountVal(0);
             runCountUp(allTimeSaved,()=>{
               if(cancelled) return;
-              // Phase 5: hold number
               timerRef.current=setTimeout(()=>{
                 if(cancelled) return;
-                // Phase 6: fade out number
                 setOpacity(0);
                 timerRef.current=setTimeout(()=>{ if(!cancelled) cycle(); },400);
               },2200);
@@ -273,8 +292,6 @@ function LogoAnimation({allTimeSaved,fmt,compact}){
     cycle();
     return cleanup;
   },[allTimeSaved,hasData,fullText]);
-
-  const sym=CURRENCY_SYMBOLS[T.bgLight?"SGD":"SGD"];
 
   if(phase==="logo"){
     const parts=typed.split("||");
@@ -289,7 +306,6 @@ function LogoAnimation({allTimeSaved,fmt,compact}){
     </div>;
   }
 
-  // number phase
   const absVal=Math.abs(countVal);
   const formatted=CURRENCY_SYMBOLS["SGD"]+absVal.toLocaleString("en-SG",{minimumFractionDigits:2,maximumFractionDigits:2});
   return <div style={{opacity,transition:"opacity 0.35s ease",minHeight:compact?20:38}}>
@@ -299,7 +315,7 @@ function LogoAnimation({allTimeSaved,fmt,compact}){
   </div>;
 }
 
-// ── CountUp — animates a number from 0 to target on mount/change ──────────────
+// ── CountUp ───────────────────────────────────────────────────────────────────
 function CountUp({value,format,duration=900}){
   const [display,setDisplay]=useState(0);
   const prev=useRef(0); const raf=useRef(null);
@@ -307,7 +323,6 @@ function CountUp({value,format,duration=900}){
     const start=prev.current; const end=value; const startTime=performance.now();
     const tick=now=>{
       const elapsed=now-startTime; const progress=Math.min(elapsed/duration,1);
-      // ease-out cubic
       const eased=1-Math.pow(1-progress,3);
       const current=start+(end-start)*eased;
       setDisplay(current);
@@ -333,10 +348,10 @@ function ThemePresets({accentColor,bgColor,onChange}){
     <div style={{background:isLight(p.bg)?mixHex(p.bg,"#000000",0.05):mixHex(p.bg,"#ffffff",0.05),padding:"6px 10px",fontSize:11,color:isLight(p.bg)?"#555":"#aaa",fontFamily:"'DM Mono'"}}>{p.name}</div>
   </div>; };
   return <div><SLabel>Theme</SLabel>
-    <div style={{fontSize:11,color:T.textMuted,marginBottom:8,fontFamily:"'DM Mono'",letterSpacing:1}}>DARK</div>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>{DARK_PRESETS.map(rp)}</div>
     <div style={{fontSize:11,color:T.textMuted,marginBottom:8,fontFamily:"'DM Mono'",letterSpacing:1}}>LIGHT</div>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>{LIGHT_PRESETS.map(rp)}</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>{LIGHT_PRESETS.map(rp)}</div>
+    <div style={{fontSize:11,color:T.textMuted,marginBottom:8,fontFamily:"'DM Mono'",letterSpacing:1}}>DARK</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>{DARK_PRESETS.map(rp)}</div>
   </div>;
 }
 
@@ -354,7 +369,7 @@ function DragList({items,onReorder,renderItem}){
   })}</div>;
 }
 
-// ── MonthPicker — positions relative to its own button ────────────────────────
+// ── MonthPicker ───────────────────────────────────────────────────────────────
 function MonthPicker({value,onChange,startMonth}){
   const T=useTheme(); const inp=useInp(); const [open,setOpen]=useState(false); const [typed,setTyped]=useState(value);
   const btnRef=useRef(); const dropRef=useRef(); const [pos,setPos]=useState({top:0,left:0,right:"auto"});
@@ -418,8 +433,6 @@ function SixMonthChart({monthlyData,incomeStreams,selectedMonth,startMonth,fixed
   </div>;
 }
 
-// ── InsightCards ──────────────────────────────────────────────────────────────
-// ── CompactTxRow — simple editable row matching archive style ─────────────────
 function CompactTxRow({tx,onArchive,onEdit,fmt,customCategories}){
   const T=useTheme(); const inp=useInp();
   const CATS=getAllCats(customCategories); const COLS=getAllCatCols(customCategories);
@@ -469,7 +482,6 @@ function ManualAddForm({onAdd,categories,defaultDate}){
 
 function InsightCards({text}){
   const T=useTheme(); if(!text) return null;
-  // Match lines starting with relevant emojis; fallback for un-prefixed lines
   const EMOJI_RE=/^([📉⚠💡🎯📈🔴🟢✅⏰📊🏆]\uFE0F?)\s*/;
   const items=text.split(/\n+/).map(l=>l.trim()).filter(Boolean).map(l=>{
     const clean=l.replace(/^\d+[\.\)]\s*/,"").replace(/^[-•]\s*/,"").trim();
@@ -477,7 +489,6 @@ function InsightCards({text}){
     if(m) return {icon:m[1],text:clean.slice(m[0].length).trim()};
     return {icon:"💡",text:clean};
   }).filter(x=>x.text);
-  const iconCol={"📉":T.positive,"📈":T.warning,"⚠️":T.warning,"⚠":T.warning,"💡":T.info,"🎯":T.accent,"✅":T.positive,"🔴":T.negative,"🟢":T.positive};
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     {items.map((item,i)=><div key={i} style={{display:"flex",gap:12,padding:"12px 14px",background:T.surface2,borderRadius:12,border:`1px solid ${T.border}`,alignItems:"flex-start"}}>
       <span style={{fontSize:18,flexShrink:0,lineHeight:1.3}}>{item.icon}</span>
@@ -486,7 +497,6 @@ function InsightCards({text}){
   </div>;
 }
 
-// ── TxRow ─────────────────────────────────────────────────────────────────────
 function TxRow({tx,onArchive,onEdit,fmt,customCategories}){
   const T=useTheme(); const inp=useInp();
   const CATS=getAllCats(customCategories); const COLS=getAllCatCols(customCategories);
@@ -508,7 +518,6 @@ function TxRow({tx,onArchive,onEdit,fmt,customCategories}){
       <div style={{fontSize:14,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:T.textPrimary,marginBottom:4}}>
         {tx.description}{tx.source==="imported"&&<span style={{marginLeft:7,fontSize:10,color:T.accent,opacity:.5,fontFamily:"'DM Mono'"}}>AI</span>}
         {isCredit&&<span style={{marginLeft:7,fontSize:10,color:T.positive,fontFamily:"'DM Mono'",border:`1px solid ${T.positive}40`,borderRadius:5,padding:"1px 7px"}}>CR</span>}
-
       </div>
       <div style={{display:"flex",gap:10,alignItems:"center"}}>
         <span style={{fontSize:12,color:T.textMuted,fontFamily:"'DM Mono'"}}>{tx.date}</span>
@@ -521,18 +530,107 @@ function TxRow({tx,onArchive,onEdit,fmt,customCategories}){
   </div>;
 }
 
-// ── VariableIncomeEntry ───────────────────────────────────────────────────────
-function VarIncomeEntry({streams,ov,onUpdate,month}){
+// ╔══════════════════════════════════════════════════════════════════════════╗
+// ║  VarIncomeEntry — REWRITTEN (Part 1's main fix)                          ║
+// ║                                                                          ║
+// ║  OLD bug: input was uncontrolled, used onBlur — values lost on re-render.║
+// ║  Once entered, the row vanished (only "pending" streams showed) so users ║
+// ║  couldn't edit a wrong number.                                           ║
+// ║                                                                          ║
+// ║  FIX:                                                                    ║
+// ║   • Controlled input keyed by stream id; local draft state survives      ║
+// ║     re-renders.                                                          ║
+// ║   • Always shows ALL variable + oneoff streams, with status pill         ║
+// ║     ("Needs amount" / "Saved").                                          ║
+// ║   • Explicit Save button per row (also Enter to save, Esc to revert).    ║
+// ║   • Per-row "Clear" so users can blank out a wrong entry.                ║
+// ║   • Visual confirmation (pill turns green) after save.                   ║
+// ╚══════════════════════════════════════════════════════════════════════════╝
+function VarIncomeEntry({streams,ov,onUpdate,onClear,month,fmt}){
   const T=useTheme(); const inp=useInp();
-  const pending=pendingVarStreams(streams,ov,month);
-  if(pending.length===0) return null;
-  return <Card style={{border:`1px solid ${T.warning}50`,background:T.warning+"08"}}>
-    <SLabel style={{color:T.warning}}>Income — {pending.length} stream{pending.length>1?"s":""} need amounts</SLabel>
-    {pending.map(({stream:s})=><div key={s.id} style={{display:"flex",gap:10,alignItems:"center",marginBottom:10}}>
-      <div style={{flex:1}}><div style={{fontSize:13,color:T.textSecondary,marginBottom:4}}>{s.name} <span style={{fontSize:11,color:T.textMuted}}>({s.type})</span></div>
-        <input type="number" placeholder="Enter amount" style={inp} onBlur={e=>{const v=parseFloat(e.target.value);if(!isNaN(v)&&v>=0)onUpdate(s.id,v);}} onKeyDown={e=>{if(e.key==="Enter"){const v=parseFloat(e.target.value);if(!isNaN(v)&&v>=0){onUpdate(s.id,v);e.target.value="";}}}}/></div>
-      <div style={{width:8,height:8,borderRadius:"50%",background:T.warning,flexShrink:0,marginTop:18}}/>
-    </div>)}
+  const allVar=allVarStreams(streams,ov,month);
+  const [drafts,setDrafts]=useState({});
+  const [savedFlash,setSavedFlash]=useState({});
+
+  // Keep draft strings in sync with the source-of-truth ov values when month/streams change.
+  useEffect(()=>{
+    const next={};
+    allVar.forEach(({stream:s,amount})=>{
+      next[s.id]=amount===null||amount===undefined?"":String(amount);
+    });
+    setDrafts(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[month,streams.length,Object.keys(ov||{}).length]);
+
+  if(allVar.length===0) return null;
+
+  const setDraft=(id,val)=>setDrafts(d=>({...d,[id]:val}));
+  const save=(id)=>{
+    const raw=drafts[id]; const v=parseFloat(raw);
+    if(raw===""||isNaN(v)||v<0) return;
+    onUpdate(id,v);
+    setSavedFlash(f=>({...f,[id]:true}));
+    setTimeout(()=>setSavedFlash(f=>{ const n={...f}; delete n[id]; return n; }),1400);
+  };
+  const clear=(id)=>{
+    setDraft(id,"");
+    if(onClear) onClear(id); // delegate to parent — removes the override key
+  };
+
+  const pendingCount=allVar.filter(({amount})=>amount===null).length;
+  const headerCol=pendingCount>0?T.warning:T.positive;
+
+  return <Card style={{border:`1px solid ${headerCol}50`,background:headerCol+"08"}}>
+    <SLabel style={{color:headerCol}}>
+      Variable income — {pendingCount>0?`${pendingCount} need amount${pendingCount>1?"s":""}`:"all entered ✓"}
+    </SLabel>
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      {allVar.map(({stream:s,amount})=>{
+        const isSaved=amount!==null&&amount!==undefined;
+        const flashing=!!savedFlash[s.id];
+        const draftVal=drafts[s.id]??"";
+        const dirty=isSaved
+          ? String(amount)!==String(parseFloat(draftVal))
+          : draftVal.trim()!=="";
+        const pillCol=flashing?T.positive:isSaved?T.positive:T.warning;
+        const pillText=flashing?"✓ Saved":isSaved?"Saved":"Needs amount";
+        return <div key={s.id} style={{display:"flex",gap:10,alignItems:"flex-end"}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+              <div style={{fontSize:13,color:T.textSecondary,fontWeight:500}}>{s.name}</div>
+              <div style={{fontSize:10,color:T.textMuted,fontFamily:"'DM Mono'",letterSpacing:.5,textTransform:"uppercase"}}>{s.type}</div>
+              <div style={{fontSize:10,fontWeight:700,color:pillCol,background:pillCol+"18",borderRadius:10,padding:"2px 8px",fontFamily:"'DM Mono'",letterSpacing:.5,transition:"all .25s"}}>{pillText}</div>
+            </div>
+            <input
+              type="number"
+              inputMode="decimal"
+              placeholder={`Enter ${s.name} amount`}
+              value={draftVal}
+              onChange={e=>setDraft(s.id,e.target.value)}
+              onKeyDown={e=>{
+                if(e.key==="Enter"){ save(s.id); e.target.blur(); }
+                if(e.key==="Escape"){ setDraft(s.id,isSaved?String(amount):""); }
+              }}
+              style={inp}
+            />
+          </div>
+          <div style={{display:"flex",gap:6,flexShrink:0,paddingBottom:1}}>
+            <button
+              onClick={()=>save(s.id)}
+              disabled={!dirty}
+              style={{padding:"10px 14px",background:dirty?T.accent:T.border,border:"none",borderRadius:9,fontFamily:"inherit",fontWeight:600,fontSize:13,color:dirty?T.accentText:T.textMuted,cursor:dirty?"pointer":"default",whiteSpace:"nowrap",minHeight:42}}
+              title={isSaved?"Update saved amount":"Save amount"}
+            >{isSaved?"Update":"Save"}</button>
+            {isSaved&&<button
+              onClick={()=>clear(s.id)}
+              style={{padding:"10px 12px",background:"transparent",border:`1px solid ${T.borderMid}`,borderRadius:9,fontFamily:"inherit",fontSize:13,color:T.textSecondary,cursor:"pointer",whiteSpace:"nowrap",minHeight:42}}
+              title="Clear this amount"
+            >Clear</button>}
+          </div>
+        </div>;
+      })}
+    </div>
+    {pendingCount===0&&<div style={{marginTop:14,fontSize:12,color:T.textMuted}}>Tip: edit any amount above and press <span style={{fontFamily:"'DM Mono'",color:T.textSecondary}}>Update</span> to change it.</div>}
   </Card>;
 }
 
@@ -559,6 +657,13 @@ function IncomeBreakdown({streams,ov,prevOv,fmt,month,onUpdateOv}){
     <div style={{display:"flex",justifyContent:"space-between",paddingTop:10}}><span style={{fontSize:13,color:T.textMuted}}>Total income</span><span style={{fontFamily:"'DM Mono'",fontSize:15,color:T.positive,fontWeight:700}}>{fmt(total)}</span></div>
   </div>;
 }
+
+// ═══ END PART 1 OF 3 — continues in Part 2 ═══
+
+    // ════════════════════════════════════════════════════════════════════════════
+// ═══ PART 2 OF 3 ═══  App.jsx — Show Me The Money
+// ═══ Paste directly after Part 1, before Part 3
+// ════════════════════════════════════════════════════════════════════════════
 
 // ── PIN Screen ────────────────────────────────────────────────────────────────
 function PinScreen({storedHash,onUnlock,onSetup,onSkip}){
@@ -621,10 +726,8 @@ function RestoreModal({backup,onConfirm,onClose}){
 function AvatarCropModal({src,onSave,onClose}){
   const T=useTheme();
   const SIZE=280;
-  // scale is a multiplier relative to the "fill" scale (1.0 = exactly fills frame)
-  // so minimum is always 1.0 (image covers frame), max is 3× that
-  const [fillScale,setFillScale]=useState(1); // scale that fills the frame
-  const [zoom,setZoom]=useState(1);           // 1.0 = fill, >1 = zoomed in
+  const [fillScale,setFillScale]=useState(1);
+  const [zoom,setZoom]=useState(1);
   const [offset,setOffset]=useState({x:0,y:0});
   const [dragging,setDragging]=useState(false);
   const [lastPos,setLastPos]=useState({x:0,y:0});
@@ -633,7 +736,6 @@ function AvatarCropModal({src,onSave,onClose}){
   const imgRef=useRef();
   const MAX_ZOOM=4;
 
-  // When image loads: compute the fill scale, set zoom=1, center offset
   const onImgLoad=()=>{
     const {naturalWidth:w,naturalHeight:h}=imgRef.current;
     setImgNatural({w,h});
@@ -643,73 +745,66 @@ function AvatarCropModal({src,onSave,onClose}){
     setOffset({x:0,y:0});
   };
 
-  // Current pixel size of image
   const scale=fillScale*zoom;
   const iw=imgNatural.w*scale;
   const ih=imgNatural.h*scale;
 
-  // Clamp offset: image must always cover the frame completely
-  const clamp=(ox,oy,sc)=>{
-    const w=imgNatural.w*sc; const h=imgNatural.h*sc;
-    // half-extents of how far image centre can move from frame centre
-    const hx=Math.max(0,(w-SIZE)/2); const hy=Math.max(0,(h-SIZE)/2);
-    return {x:Math.min(hx,Math.max(-hx,ox)), y:Math.min(hy,Math.max(-hy,oy))};
+  const clampOffset=(o,s=scale)=>{
+    const w=imgNatural.w*s, h=imgNatural.h*s;
+    const maxX=Math.max(0,(w-SIZE)/2);
+    const maxY=Math.max(0,(h-SIZE)/2);
+    return {x:Math.max(-maxX,Math.min(maxX,o.x)),y:Math.max(-maxY,Math.min(maxY,o.y))};
   };
 
-  const applyZoom=nz=>{
-    const clamped=Math.min(MAX_ZOOM,Math.max(1,nz));
-    setZoom(clamped);
-    setOffset(o=>clamp(o.x,o.y,fillScale*clamped));
+  const applyZoom=(z,centerX,centerY)=>{
+    const newZoom=Math.max(1,Math.min(MAX_ZOOM,z));
+    const newScale=fillScale*newZoom;
+    if(centerX!==undefined&&centerY!==undefined){
+      const ratio=newScale/scale;
+      setOffset(o=>clampOffset({x:centerX-(centerX-o.x)*ratio,y:centerY-(centerY-o.y)*ratio},newScale));
+    } else {
+      setOffset(o=>clampOffset(o,newScale));
+    }
+    setZoom(newZoom);
   };
 
-  // ── Mouse drag ──────────────────────────────────────────────────────────────
-  const onMouseDown=e=>{ e.preventDefault(); setDragging(true); setLastPos({x:e.clientX,y:e.clientY}); };
-  const onMouseMove=e=>{
-    if(!dragging) return;
-    const dx=e.clientX-lastPos.x; const dy=e.clientY-lastPos.y;
-    setOffset(o=>clamp(o.x+dx,o.y+dy,scale));
-    setLastPos({x:e.clientX,y:e.clientY});
-  };
+  const onMouseDown=e=>{ setDragging(true); setLastPos({x:e.clientX,y:e.clientY}); };
+  const onMouseMove=e=>{ if(!dragging) return; const dx=e.clientX-lastPos.x, dy=e.clientY-lastPos.y; setOffset(o=>clampOffset({x:o.x+dx,y:o.y+dy})); setLastPos({x:e.clientX,y:e.clientY}); };
   const onMouseUp=()=>setDragging(false);
 
-  // ── Touch drag + pinch ──────────────────────────────────────────────────────
   const onTouchStart=e=>{
-    if(e.touches.length===1){ setDragging(true); setLastPos({x:e.touches[0].clientX,y:e.touches[0].clientY}); }
     if(e.touches.length===2){
       const dx=e.touches[0].clientX-e.touches[1].clientX;
       const dy=e.touches[0].clientY-e.touches[1].clientY;
-      setLastPinchDist(Math.hypot(dx,dy));
+      setLastPinchDist(Math.sqrt(dx*dx+dy*dy));
+    } else if(e.touches.length===1){
+      setDragging(true); setLastPos({x:e.touches[0].clientX,y:e.touches[0].clientY});
     }
   };
   const onTouchMove=e=>{
     e.preventDefault();
-    if(e.touches.length===1&&dragging){
-      const dx=e.touches[0].clientX-lastPos.x; const dy=e.touches[0].clientY-lastPos.y;
-      setOffset(o=>clamp(o.x+dx,o.y+dy,scale));
-      setLastPos({x:e.touches[0].clientX,y:e.touches[0].clientY});
-    }
-    if(e.touches.length===2&&lastPinchDist!==null){
+    if(e.touches.length===2&&lastPinchDist){
       const dx=e.touches[0].clientX-e.touches[1].clientX;
       const dy=e.touches[0].clientY-e.touches[1].clientY;
-      const dist=Math.hypot(dx,dy);
-      applyZoom(zoom*(dist/lastPinchDist));
-      setLastPinchDist(dist);
+      const d=Math.sqrt(dx*dx+dy*dy);
+      applyZoom(zoom*(d/lastPinchDist));
+      setLastPinchDist(d);
+    } else if(e.touches.length===1&&dragging){
+      const dx=e.touches[0].clientX-lastPos.x, dy=e.touches[0].clientY-lastPos.y;
+      setOffset(o=>clampOffset({x:o.x+dx,y:o.y+dy}));
+      setLastPos({x:e.touches[0].clientX,y:e.touches[0].clientY});
     }
   };
   const onTouchEnd=()=>{ setDragging(false); setLastPinchDist(null); };
 
-  // ── Scroll to zoom ──────────────────────────────────────────────────────────
   const onWheel=e=>{ e.preventDefault(); applyZoom(zoom*(1-e.deltaY*0.002)); };
 
-  // ── Export ──────────────────────────────────────────────────────────────────
   const saveCrop=()=>{
     const OUT=400;
     const canvas=document.createElement("canvas"); canvas.width=OUT; canvas.height=OUT;
     const ctx=canvas.getContext("2d");
-    // In frame coords, image top-left is at:
     const imgLeft=(SIZE/2)-(iw/2)+offset.x;
     const imgTop=(SIZE/2)-(ih/2)+offset.y;
-    // Source region in natural image pixels that maps to the SIZE×SIZE frame:
     const sx=-imgLeft/scale; const sy=-imgTop/scale;
     const sw=SIZE/scale; const sh=SIZE/scale;
     ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, OUT, OUT);
@@ -722,7 +817,6 @@ function AvatarCropModal({src,onSave,onClose}){
     <div style={{background:T.surface,borderRadius:20,padding:24,width:"100%",maxWidth:360,boxShadow:"0 24px 80px rgba(0,0,0,0.5)"}}>
       <p style={{margin:"0 0 4px",fontSize:18,fontWeight:700,color:T.textPrimary}}>Crop your photo</p>
       <p style={{margin:"0 0 16px",fontSize:13,color:T.textMuted}}>Drag to reposition · Scroll or pinch to zoom</p>
-      {/* Crop preview — circle clips the image */}
       <div style={{width:SIZE,height:SIZE,borderRadius:"50%",overflow:"hidden",margin:"0 auto 16px",cursor:dragging?"grabbing":"grab",position:"relative",boxShadow:`0 0 0 9999px ${T.bg}99, 0 0 0 3px ${T.accent}`,userSelect:"none",touchAction:"none"}}
         onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
         onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
@@ -730,7 +824,6 @@ function AvatarCropModal({src,onSave,onClose}){
         <img ref={imgRef} src={src} alt="" onLoad={onImgLoad}
           style={{position:"absolute",width:iw,height:ih,left:(SIZE/2)-(iw/2)+offset.x,top:(SIZE/2)-(ih/2)+offset.y,pointerEvents:"none",userSelect:"none",display:"block"}}/>
       </div>
-      {/* Zoom slider — 0% = fill, 100% = max zoom */}
       <div style={{marginBottom:18,padding:"0 4px"}}>
         <input type="range" min={0} max={100} value={sliderPct}
           onChange={e=>applyZoom(1+(parseInt(e.target.value)/100)*(MAX_ZOOM-1))}
@@ -794,7 +887,12 @@ function RecurringModal({suggestions,onConfirm,onDismiss}){
 // ── Onboarding ────────────────────────────────────────────────────────────────
 function Onboarding({onComplete}){
   const T=useTheme(); const inp=useInp(); const [step,setStep]=useState(0);
-  const [p,setP]=useState({name:"",currency:"SGD",occupation:"",accentColor:"#C8FF57",bgColor:"#0C0C12",incomeStreams:[],fixedCommitments:[],startMonth:currentMonth()});
+  const [p,setP]=useState({
+    name:"",currency:"SGD",occupation:"",
+    accentColor: CALM_DEFAULT_ACCENT,
+    bgColor:     CALM_DEFAULT_BG,
+    incomeStreams:[],fixedCommitments:[],startMonth:currentMonth()
+  });
   const avatarRef=useRef();
   const [cropSrc,setCropSrc]=useState(null);
   const handleAvatar=e=>{
@@ -803,7 +901,7 @@ function Onboarding({onComplete}){
     reader.onload=ev=>setCropSrc(ev.target.result);
     reader.readAsDataURL(f);
   };
-  const finish=()=>onComplete({...DEFAULT_PROFILE,...p,incomeStreams:(p.incomeStreams||[]).map(s=>({...s,defaultAmount:parseFloat(s.defaultAmount)||0})),fixedCommitments:(p.fixedCommitments||[]).map(c=>({...c,amount:parseFloat(c.amount)||0,startFrom:c.startFrom||"",endMonth:c.endMonth||""})),onboarded:true});
+  const finish=()=>onComplete({...DEFAULT_PROFILE,...p,incomeStreams:(p.incomeStreams||[]).map(s=>({...s,defaultAmount:parseFloat(s.defaultAmount)||0,active:s.active!==false})),fixedCommitments:(p.fixedCommitments||[]).map(c=>({...c,amount:parseFloat(c.amount)||0,startFrom:c.startFrom||"",endMonth:c.endMonth||""})),onboarded:true});
   const updStream=(id,field,val)=>setP(v=>({...v,incomeStreams:v.incomeStreams.map(x=>x.id===id?{...x,[field]:val}:x)}));
   const steps=[
     // Step 0 — identity
@@ -889,7 +987,6 @@ function Onboarding({onComplete}){
         </div>)}
       </div>
       <button onClick={()=>setP(v=>({...v,fixedCommitments:[...(v.fixedCommitments||[]),{id:`c${Date.now()}`,name:"",amount:"",startFrom:"",endMonth:""}]}))} style={{padding:"12px",background:"transparent",border:`1px dashed ${T.borderMid}`,borderRadius:10,color:T.textMuted,fontFamily:"inherit",fontSize:14,cursor:"pointer",width:"100%",marginBottom:18}}>+ Add bill</button>
-      {/* What happens next */}
       <div style={{background:T.accentMuted,border:`1px solid ${T.accentBorder}`,borderRadius:12,padding:"14px 16px",marginBottom:18}}>
         <div style={{fontSize:13,fontWeight:600,color:T.accent,marginBottom:6}}>What happens next</div>
         <div style={{display:"flex",flexDirection:"column",gap:5}}>
@@ -911,6 +1008,7 @@ function Onboarding({onComplete}){
     </div>
   </div>;
 }
+
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App(){
   const [pinUnlocked,setPinUnlocked]=useState(false);
@@ -926,8 +1024,8 @@ export default function App(){
   const [pendingTxs,setPendingTxs]=useState([]);
   const [uploading,setUploading]=useState(false);
   const [uploadMsg,setUploadMsg]=useState("");
-  const [uploadStep,setUploadStep]=useState(0); // 0=idle, 1=reading, 2=claude, 3=categorising, 4=ready
-  const [uploadFile,setUploadFile]=useState(null); // {name, size}
+  const [uploadStep,setUploadStep]=useState(0);
+  const [uploadFile,setUploadFile]=useState(null);
   const [uploadTxCount,setUploadTxCount]=useState(0);
   const [form,setForm]=useState({date:todayStr(),description:"",category:BUILTIN_CATEGORIES[0],amount:""});
   const [insights,setInsights]=useState({text:"",timestamp:null});
@@ -937,7 +1035,6 @@ export default function App(){
   const [editHintSeen,setEditHintSeen]=useState(false);
   const [tutorialDismissed,setTutorialDismissed]=useState(false);
   const [catFilter,setCatFilter]=useState("All");
-  // Collapsible section states — lifted to App level so they don't reset on re-render
   const [moneyShowIncome,setMoneyShowIncome]=useState(false);
   const [moneyShowBills,setMoneyShowBills]=useState(false);
   const [moneyShowGoals,setMoneyShowGoals]=useState(false);
@@ -971,7 +1068,10 @@ export default function App(){
     return()=>clearTimeout(backupTimer.current);
   },[profile,monthlyData,eh,ch,archive]);
 
-  const theme=useMemo(()=>buildTheme(profile?.accentColor||"#C8FF57",profile?.bgColor||"#0C0C12"),[profile?.accentColor,profile?.bgColor]);
+  const theme=useMemo(
+    ()=>buildTheme(profile?.accentColor||CALM_DEFAULT_ACCENT, profile?.bgColor||CALM_DEFAULT_BG),
+    [profile?.accentColor,profile?.bgColor]
+  );
   const T=theme;
   const CATS=useMemo(()=>getAllCats(profile?.customCategories),[profile?.customCategories]);
   const CCOLS=useMemo(()=>getAllCatCols(profile?.customCategories),[profile?.customCategories]);
@@ -1025,7 +1125,18 @@ export default function App(){
   const doRestore=snap=>{ saveProfile(snap.profile||DEFAULT_PROFILE); lsSave("monthlyData",snap.monthlyData||{}); setMonthlyData(snap.monthlyData||{}); lsSave("excludeHistory",snap.excludeHistory||{}); setEh(snap.excludeHistory||{}); lsSave("catExcludeHistory",snap.catExcludeHistory||{}); setCh(snap.catExcludeHistory||{}); if(snap.insights){setInsights(snap.insights);lsSave("insights",snap.insights);} if(snap.archive){saveArchive(snap.archive);} setRestoreCandidate(null); showToast("✓ Backup restored"); setTab("home"); window.location.reload(); };
   const doReset=()=>{ lsClear(); window.location.reload(); };
 
-  const updateOv=async(streamId,amount)=>{ const updated={...ov,[streamId]:amount}; await saveMD(selectedMonth,{incomeOverrides:updated}); };
+  // updateOv — sets a stream override for the selected month.
+  const updateOv=async(streamId,amount)=>{
+    const updated={...ov,[streamId]:amount};
+    await saveMD(selectedMonth,{incomeOverrides:updated});
+  };
+  // clearOv — removes the override key entirely so the stream returns to "pending".
+  // Used by the new VarIncomeEntry's "Clear" button.
+  const clearOv=async(streamId)=>{
+    const updated={...ov};
+    delete updated[streamId];
+    await saveMD(selectedMonth,{incomeOverrides:updated});
+  };
 
   const archiveTx=id=>{ const tx=(md.txs||[]).find(t=>t.id===id); if(!tx) return; saveArchive([{...tx,archivedAt:new Date().toISOString()},...archive].slice(0,500)); saveMD(selectedMonth,{txs:(md.txs||[]).filter(t=>t.id!==id)}); showToast("Moved to archive"); };
   const restoreToReview=id=>{ const tx=archive.find(t=>t.id===id); if(!tx) return; const{archivedAt:_,...clean}=tx; setPendingTxs(p=>[{...clean,checked:true,source:clean.source||"manual"},...p]); saveArchive(archive.filter(t=>t.id!==id)); showToast("✓ Moved to Review"); setTab("review"); };
@@ -1102,13 +1213,11 @@ export default function App(){
 Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":"cleaned merchant name","amount":positive_number,"isCredit":boolean,"category":string}. Output ONLY the JSON array.`;
     const body=typeof content==="string"?`${prompt}\n\nStatement:\n${content}`:[...content,{type:"text",text:prompt}];
     const controller=new AbortController();
-    // Vercel Pro plan allows up to 300s. Set client timeout slightly shorter so we get a graceful error.
     const timeoutId=setTimeout(()=>controller.abort(),290000);
     let res;
     try{ res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:16000,messages:[{role:"user",content:body}]}),signal:controller.signal}); }
     finally{ clearTimeout(timeoutId); }
     if(!res.ok){ let msg=`Server error ${res.status}`; try{const e=await res.json();msg=e.error||e.detail||msg;}catch(e){} throw new Error(msg); }
-    // Read SSE stream — server sends chunks then a final {done:true,content:[...]} event
     const reader=res.body.getReader(); const dec=new TextDecoder();
     let finalData=null;
     while(true){
@@ -1132,14 +1241,14 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     const file=e.target.files[0]; if(!file) return;
     setUploading(true); setUploadMsg("");
     setUploadFile({name:file.name,size:file.size});
-    setUploadStep(1); // reading file
+    setUploadStep(1);
     setUploadTxCount(0);
     try{
       let parsed=[];
       const isImage=/^image\//i.test(file.type); const isPDF=file.name.toLowerCase().endsWith(".pdf");
       if(isImage||isPDF){
         const base64=await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(",")[1]); r.onerror=rej; r.readAsDataURL(file); });
-        setUploadStep(2); // claude reading
+        setUploadStep(2);
         parsed=await parseChunk([{type:"document",source:{type:"base64",media_type:isImage?file.type:"application/pdf",data:base64}}]);
       } else {
         const text=await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsText(file); });
@@ -1148,7 +1257,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         for(let i=0;i<chunks.length;i++){ parsed=[...parsed,...await parseChunk(chunks[i])]; }
       }
       if(!Array.isArray(parsed)||!parsed.length) throw new Error("No transactions found in statement");
-      setUploadStep(3); // categorising
+      setUploadStep(3);
       setUploadTxCount(parsed.length);
       const seen=new Set(); parsed=parsed.filter(t=>{ const k=`${t.date}|${(t.description||"").toLowerCase()}|${Math.abs(parseFloat(t.amount)||0)}`; if(seen.has(k)) return false; seen.add(k); return true; });
       const fixedDetected=[];
@@ -1172,14 +1281,12 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         const reason=habitReason({description:(t.description||"").toLowerCase().trim(),category:cat},mf,cf);
         return {id:`${nonce}${i}`,date:t.date||todayStr(),description:t.description||"Unknown",amount,category:cat,source:"imported",checked:!reason,habitReason:reason};
       }).filter(Boolean);
-      // Append to pending (not replace) — so multi-part uploads accumulate
       setPendingTxs(p=>[...p,...imported]);
       if(fixedDetected.length>0) setFixedCommitDetected(fixedDetected);
-      setUploadStep(4); // ready for review
+      setUploadStep(4);
       setUploadTxCount(imported.length);
       const months=[...new Set(imported.map(t=>monthKey(t.date)))].sort();
       setUploadMsg(`✓ Found ${imported.length} transactions across ${months.length} month${months.length>1?"s":""}`);
-      // Small delay so user sees "Ready for review" before navigation
       setTimeout(()=>setTab("review"),700);
     }catch(err){
       console.error(err); const msg=err.message||"Unknown error";
@@ -1197,7 +1304,6 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     const existNames=new Set(existing.map(c=>c.name?.toLowerCase()));
     const toAdd=confirmed.filter(c=>!existNames.has(c.description?.toLowerCase())).map(c=>({id:`c${Date.now()}${Math.random()}`,name:c.description,amount:c.rawAmount,startFrom:"",endMonth:""}));
     if(toAdd.length>0){saveProfile({...profile,fixedCommitments:[...existing,...toAdd]});showToast(`✓ Added ${toAdd.length} fixed commitment${toAdd.length>1?"s":""}`);}
-    // Items NOT confirmed go back into review as unchecked transactions
     const allDetected=fixedCommitDetected||[];
     const confirmedDescs=new Set(confirmed.map(c=>c.description));
     const toReview=allDetected.filter(c=>!confirmedDescs.has(c.description)&&c.fullTx).map(c=>c.fullTx);
@@ -1232,7 +1338,9 @@ ${hist}`}]})});
   };
 
   // ── PIN / loading gate ──────────────────────────────────────────────────────
-  const savedAccent=lsLoad("profile")?.accentColor||"#C8FF57"; const savedBg=lsLoad("profile")?.bgColor||"#0C0C12";
+  // Use stored profile theme if present, else Calm defaults.
+  const savedAccent = lsLoad("profile")?.accentColor || CALM_DEFAULT_ACCENT;
+  const savedBg     = lsLoad("profile")?.bgColor     || CALM_DEFAULT_BG;
   if(!pinUnlocked&&!pinSkipped){
     return <ThemeCtx.Provider value={buildTheme(savedAccent,savedBg)}>
       <PinScreen storedHash={pinHash||null} onUnlock={()=>setPinUnlocked(true)}
@@ -1240,8 +1348,17 @@ ${hist}`}]})});
         onSkip={()=>setPinSkipped(true)}/>
     </ThemeCtx.Provider>;
   }
-  if(!profile){ return <div style={{minHeight:"100vh",background:"#0C0C12",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}><div style={{textAlign:"center"}}><div style={{fontSize:11,letterSpacing:3,textTransform:"uppercase",color:savedAccent,fontFamily:"'DM Mono'",marginBottom:8,opacity:.8}}>Welcome back</div><div style={{fontSize:24,fontWeight:700,color:"#EEEAE0"}}>$how Me The Money</div></div><div style={{display:"flex",gap:8}}>{[0,1,2].map(i=><div key={i} style={{width:7,height:7,borderRadius:"50%",background:savedAccent,opacity:.3,animation:`pulse 1.2s ease-in-out ${i*0.2}s infinite`}}/>)}</div><style>{`@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}`}</style></div>; }
-  if(!profile.onboarded) return <ThemeCtx.Provider value={buildTheme(profile.accentColor||"#C8FF57",profile.bgColor||"#0C0C12")}><Onboarding onComplete={saveProfile}/></ThemeCtx.Provider>;
+  if(!profile){
+    return <div style={{minHeight:"100vh",background:savedBg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
+      <div style={{textAlign:"center"}}>
+        <div style={{fontSize:11,letterSpacing:3,textTransform:"uppercase",color:savedAccent,fontFamily:"'DM Mono'",marginBottom:8,opacity:.8}}>Welcome back</div>
+        <div style={{fontSize:24,fontWeight:700,color:isLight(savedBg)?"#111118":"#EEEAE0"}}>$how Me The Money</div>
+      </div>
+      <div style={{display:"flex",gap:8}}>{[0,1,2].map(i=><div key={i} style={{width:7,height:7,borderRadius:"50%",background:savedAccent,opacity:.3,animation:`pulse 1.2s ease-in-out ${i*0.2}s infinite`}}/>)}</div>
+      <style>{`@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}`}</style>
+    </div>;
+  }
+  if(!profile.onboarded) return <ThemeCtx.Provider value={buildTheme(profile.accentColor||CALM_DEFAULT_ACCENT,profile.bgColor||CALM_DEFAULT_BG)}><Onboarding onComplete={saveProfile}/></ThemeCtx.Provider>;
 
   const inp={padding:"11px 14px",background:T.surface2,border:`1px solid ${T.borderMid}`,borderRadius:10,color:T.textPrimary,fontFamily:"inherit",fontSize:14,outline:"none",width:"100%",boxSizing:"border-box"};
   const TABS=[["home","🏠","Home"],["add","➕","Add"],["review","📋","Review"],["money","💰","Money"],["profile","👤","Profile"]];
@@ -1259,6 +1376,14 @@ ${hist}`}]})});
       {id==="review"&&pendingTxs.length>0&&<span style={{position:"absolute",top:5,right:"50%",transform:"translateX(130%)",background:T.accent,color:T.accentText,borderRadius:20,fontSize:9,fontWeight:700,padding:"1px 5px"}}>{pendingTxs.length}</span>}
     </button>;
   };
+
+// ═══ END PART 2 OF 3 — continues in Part 3 ═══
+
+      // ═══════════════════════════════════════════════════════════════
+// ║  PART 3 OF 3 — Render layer: HOME, ADD, REVIEW, MONEY,    ║
+// ║  PROFILE tabs + sidebar/header/nav + return JSX             ║
+// ║  Paste end-to-end after Part 2. No edits between parts.     ║
+// ═══════════════════════════════════════════════════════════════
 
   // ── HOME ─────────────────────────────────────────────────────────────────────
   const HomeContent=()=>{
@@ -1297,6 +1422,7 @@ ${hist}`}]})});
         </div>
         {[incTotal>0,countAllTx(monthlyData)>0].every(Boolean)&&<button onClick={()=>{setTutorialDismissed(true);lsSave("tutorialDismissed",true);}} style={{marginTop:12,width:"100%",padding:"12px",background:T.accent,border:"none",borderRadius:10,fontFamily:"inherit",fontSize:13,fontWeight:600,color:T.accentText,cursor:"pointer",minHeight:44}}>All done — hide this ✓</button>}
       </Card>}
+
       {/* Hero */}
       <Card>
         <div style={{marginBottom:16}}>
@@ -1317,8 +1443,10 @@ ${hist}`}]})});
           {topCat&&<p style={{margin:0,fontSize:13,color:T.textMuted}}>Top spend: <span style={{color:T.textPrimary,fontWeight:500}}>{topCat[0]}</span> · <span style={{color:T.accent,fontFamily:"'DM Mono'",fontWeight:600}}>{fmt(topCat[1])}</span></p>}
         </>}
       </Card>
+
       {/* Chart */}
       <Card><SLabel>6-Month Overview</SLabel><SixMonthChart monthlyData={monthlyData} incomeStreams={streams} selectedMonth={selectedMonth} startMonth={profile.startMonth} fixedCommitments={profile.fixedCommitments}/></Card>
+
       {/* Insights */}
       <Card>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:insights.text?14:0,gap:10,flexWrap:"wrap"}}>
@@ -1334,13 +1462,16 @@ ${hist}`}]})});
         </div>
         {insights.text?<InsightCards text={insights.text}/>:fullMonths>=3&&<p style={{fontSize:13,color:T.textMuted,margin:"10px 0 0"}}>Tap Generate to analyse your patterns.</p>}
       </Card>
+
       {/* Budget alerts */}
       {profile.budgets&&Object.keys(profile.budgets).length>0&&(()=>{ const alerts=byCat.filter(([cat,amt])=>{ const b=profile.budgets[cat]; return b&&b>0&&amt>b*0.8; }); if(!alerts.length) return null; return <Card style={{border:`1px solid ${T.warning}50`,background:T.warning+"08"}}><SLabel style={{color:T.warning}}>Budget Alerts</SLabel>{alerts.map(([cat,amt])=>{ const b=profile.budgets[cat]; const pct=amt/b*100; return <div key={cat} style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:14,color:T.textPrimary}}>{cat}</span><span style={{fontSize:13,fontFamily:"'DM Mono'",color:pct>=100?T.negative:T.warning,fontWeight:600}}>{fmt(amt)} / {fmt(b)}</span></div><div style={{height:4,background:T.border,borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(100,pct)}%`,background:pct>=100?T.negative:T.warning,borderRadius:4}}/></div></div>; })}</Card>; })()}
+
       {/* Nudge */}
       {nudge&&<div onClick={()=>setTab(nudge.tab)} style={{background:nudge.color+"12",border:`1px solid ${nudge.color}35`,borderRadius:16,padding:"16px 20px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div><div style={{fontSize:15,fontWeight:600,color:nudge.color}}>{nudge.title}</div><div style={{fontSize:13,color:nudge.color,opacity:.7,marginTop:3}}>{nudge.sub}</div></div>
         <span style={{fontSize:22,color:nudge.color,opacity:.5}}>→</span>
       </div>}
+
       {/* Quick add */}
       {quickAddOpen?<Card><SLabel>Quick Add</SLabel>
         <ManualAddForm categories={CATS} defaultDate={todayStr()} onAdd={({description,amount,category,date})=>{
@@ -1376,7 +1507,6 @@ ${hist}`}]})});
             {uploadMsg&&<p style={{marginTop:14,fontSize:13,color:uploadMsg.startsWith("✓")?T.positive:T.negative,margin:"14px 0 0"}}>{uploadMsg}</p>}
           </div>
           :<div>
-            {/* File info card with pulsing progress bar */}
             {uploadFile&&<div style={{padding:"14px 16px",background:T.accentMuted,border:`1px solid ${T.accentBorder}`,borderRadius:12,marginBottom:16}}>
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
                 <span style={{fontSize:20,flexShrink:0}}>📄</span>
@@ -1389,7 +1519,6 @@ ${hist}`}]})});
                 <div style={{position:"absolute",inset:0,background:T.accent,borderRadius:3,animation:uploadStep<4?"pulsebar 1.4s ease-in-out infinite":"none",width:uploadStep===4?"100%":"60%"}}/>
               </div>
             </div>}
-            {/* Step checklist */}
             <div style={{fontSize:12,color:T.textMuted,fontFamily:"'DM Mono'",marginBottom:10}}>
               {uploadStep===4?"All done — opening review…":uploadStep===3?"Organising your transactions…":uploadStep===2?"Claude is reading your statement…":"Reading file…"}
             </div>
@@ -1410,6 +1539,7 @@ ${hist}`}]})});
         <input ref={fileRef} type="file" accept=".pdf,.csv,application/pdf,text/csv" style={{display:"none"}} onChange={handleFile}/>
         <input ref={photoRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleFile}/>
       </Card>
+
       {/* Manual add */}
       <Card>
         <SLabel>Add manually</SLabel>
@@ -1444,7 +1574,6 @@ ${hist}`}]})});
     </div>; };
 
     return <div style={{paddingBottom:90}}>
-      {/* Pending imports */}
       {pendingTxs.length===0
         ?<Card style={{textAlign:"center",padding:"48px 20px"}}>
             <div style={{fontSize:44,marginBottom:14}}>📋</div>
@@ -1618,7 +1747,6 @@ ${hist}`}]})});
   };
 
   // ── PROFILE ───────────────────────────────────────────────────────────────────
-
   const ProfileContent=()=>{
     const [p,setP]=useState(profile);
     const [btnLbl,setBtnLbl]=useState("Save Profile");
@@ -1728,7 +1856,7 @@ ${hist}`}]})});
       </Card>
 
       {/* ── Theme ── */}
-      <Card><ThemePresets accentColor={p.accentColor||"#C8FF57"} bgColor={p.bgColor||"#0C0C12"} onChange={(ac,bg)=>setP(x=>({...x,accentColor:ac,bgColor:bg}))}/></Card>
+      <Card><ThemePresets accentColor={p.accentColor||"#5C5FEF"} bgColor={p.bgColor||"#F7F4ED"} onChange={(ac,bg)=>setP(x=>({...x,accentColor:ac,bgColor:bg}))}/></Card>
 
       {/* ── Income Sources ── */}
       <Card>
@@ -1907,6 +2035,7 @@ ${hist}`}]})});
       <button onClick={()=>setShowRst(true)} style={{padding:"13px",background:"transparent",border:`1px solid ${T.negative}40`,borderRadius:12,fontFamily:"inherit",fontSize:14,color:T.negative,cursor:"pointer",width:"100%",marginBottom:8}}>Reset Everything & Start Again</button>
     </div>;
   };
+
   // ── renderContent ────────────────────────────────────────────────────────────
   const renderContent=()=>{
     const wrap=children=><div style={{maxWidth:isDesktop?760:580,margin:"0 auto",padding:isDesktop?"32px 40px":"16px 16px 16px"}}>{children}</div>;
@@ -1930,7 +2059,6 @@ ${hist}`}]})});
       {restoreCandidate&&<RestoreModal backup={restoreCandidate} onConfirm={()=>doRestore(restoreCandidate)} onClose={()=>setRestoreCandidate(null)}/>}
       {showReset&&<ResetModal onConfirm={doReset} onClose={()=>setShowReset(false)} onDownloadFirst={()=>{dlBackup(profile,monthlyData,eh,ch,insights,archive);showToast("Backup downloaded");}}/>}
       {fixedCommitDetected&&<FixedCommitModal detected={fixedCommitDetected} fmt={fmt} onConfirm={handleFixedCommitConfirm} onSkip={()=>{
-        // return all detected items to review as unchecked
         const toReview=(fixedCommitDetected||[]).filter(c=>c.fullTx).map(c=>c.fullTx);
         if(toReview.length>0) setPendingTxs(p=>[...p,...toReview]);
         setFixedCommitDetected(null);
@@ -1940,7 +2068,6 @@ ${hist}`}]})});
 
       {/* ── Desktop sidebar ── */}
       {isDesktop&&<div style={{width:SIDEBAR_W,background:T.surface,borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"28px 14px",position:"fixed",top:0,left:0,bottom:0,zIndex:50,boxShadow:`4px 0 24px rgba(0,0,0,${T.bgLight?0.05:0.18})`}}>
-        {/* Brand + avatar */}
         <div style={{marginBottom:24,padding:"0 6px"}}>
           <div style={{marginBottom:8,minHeight:42}}>
             <LogoAnimation allTimeSaved={allTimeSaved} fmt={fmt} compact={false}/>
@@ -1961,7 +2088,6 @@ ${hist}`}]})});
           </div>
         </div>
 
-        {/* Month picker */}
         <div style={{marginBottom:16,padding:"0 6px"}}>
           <div style={{fontSize:10,color:T.textMuted,marginBottom:6,letterSpacing:1.5,fontFamily:"'DM Mono'"}}>PERIOD</div>
           <MonthPicker value={selectedMonth} onChange={setSelectedMonth} startMonth={profile.startMonth}/>
@@ -1969,12 +2095,10 @@ ${hist}`}]})});
 
         <div style={{height:1,background:T.border,margin:"0 6px 16px"}}/>
 
-        {/* Nav */}
         <div style={{display:"flex",flexDirection:"column",flex:1,gap:0}}>
           {TABS.map(navItem)}
         </div>
 
-        {/* Live savings strip */}
         {incTotal>0&&<div style={{marginTop:16,padding:"14px 16px",background:T.bg,borderRadius:14,border:`1px solid ${T.border}`}}>
           <div style={{fontSize:10,color:T.textMuted,marginBottom:10,letterSpacing:1.5,fontFamily:"'DM Mono'"}}>THIS MONTH</div>
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:7}}>
