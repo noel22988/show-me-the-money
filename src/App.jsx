@@ -1618,11 +1618,6 @@ ${hist}`}]})});
   };
 
   // ── PROFILE ───────────────────────────────────────────────────────────────────
-// ╔══════════════════════════════════════════════════════════════╗
-// ║  PART 2A — Profile Tab (inner component only)               ║
-// ║  Paste this INSIDE the App() function, replacing            ║
-// ║  the ProfileContent const                                    ║
-// ╚══════════════════════════════════════════════════════════════╝
 
   const ProfileContent=()=>{
     const [p,setP]=useState(profile);
