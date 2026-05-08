@@ -497,6 +497,31 @@ export default function App(){
   // Money tab state
   const [moneyShowSubs,setMoneyShowSubs]=useState(true);
   const [catFilter,setCatFilter]=useState("All");
+  // Lifted state for inner components (prevents loss on App re-render)
+  const [addOneoffOpen,setAddOneoffOpen]=useState(false);
+  const [oneoffName,setOneoffName]=useState("");
+  const [oneoffAmt,setOneoffAmt]=useState("");
+  const [manualOpen,setManualOpen]=useState(false);
+  const [manualDesc,setManualDesc]=useState("");
+  const [manualAmt,setManualAmt]=useState("");
+  const [manualCat,setManualCat]=useState("");
+  const [manualDate,setManualDate]=useState(todayStr());
+  // ReviewScreen lifted state
+  const [reviewDecisions,setReviewDecisions]=useState([]);
+  const [reviewDrag,setReviewDrag]=useState({x:0,active:false});
+  const [reviewExiting,setReviewExiting]=useState(null);
+  const [reviewUndoToast,setReviewUndoToast]=useState(null);
+  const [reviewKeepAllConfirm,setReviewKeepAllConfirm]=useState(false);
+  // IncomeBills/Goals lifted drafts
+  const [ibDraft,setIbDraft]=useState(null);
+  const [goalsDraft,setGoalsDraft]=useState(null);
+  // VarIncomeRow drafts and flash state — keyed by stream id
+  const [varDrafts,setVarDrafts]=useState({});
+  const [varFlash,setVarFlash]=useState({});
+  // ReviewScreen refs
+  const reviewCardRef=useRef();
+  const reviewStartX=useRef(0);
+  const reviewUndoTimer=useRef(null);
   const fileRef=useRef(); const photoRef=useRef();
   const backupTimer=useRef(null);
 
@@ -709,6 +734,22 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       .sort((a,b)=>b.amount-a.amount);
   },[monthlyData,profile?.startMonth,profile?.customCategories]);
 
+  // ── You-tab hooks (must be at top level, BEFORE early returns) ─────────────
+  const [youSection,setYouSection]=useState(null);
+  const [pName,setPName]=useState((profile?.name)||"");
+  const [pOcc,setPOcc]=useState((profile?.occupation)||"");
+  const [pCurrency,setPCurrency]=useState((profile?.currency)||"SGD");
+  const [pStartMonth,setPStartMonth]=useState((profile?.startMonth)||currentMonth());
+  useEffect(()=>{
+    if(!profile) return;
+    setPName(profile.name||"");
+    setPOcc(profile.occupation||"");
+    setPCurrency(profile.currency||"SGD");
+    setPStartMonth(profile.startMonth||currentMonth());
+  },[profile]);
+  const avatarRef=useRef();
+  const restoreFileRef=useRef();
+
   // ── Loading / PIN gate ──────────────────────────────────────────────────────
   const savedAccent = lsLoad("profile")?.accentColor || CALM_DEFAULT_ACCENT;
   const savedBg     = lsLoad("profile")?.bgColor     || CALM_DEFAULT_BG;
@@ -790,12 +831,13 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
   // Inline editable amount for variable income rows
   const VarIncomeRow=({stream,amount})=>{
-    const [draft,setDraft]=useState(amount===null||amount===undefined?"":String(amount));
-    const [flash,setFlash]=useState(false);
+    const draftKey=`${stream.id}__${selectedMonth}`;
+    const draft=varDrafts[draftKey]!==undefined?varDrafts[draftKey]:(amount===null||amount===undefined?"":String(amount));
+    const flash=!!varFlash[draftKey];
     const isSaved=amount!==null&&amount!==undefined;
-    useEffect(()=>{ setDraft(amount===null||amount===undefined?"":String(amount)); },[amount,stream.id,selectedMonth]);
+    const setDraft=v=>setVarDrafts(d=>({...d,[draftKey]:v}));
     const dirty=isSaved?String(amount)!==String(parseFloat(draft)):draft.trim()!=="";
-    const save=()=>{ const v=parseFloat(draft); if(draft===""||isNaN(v)||v<0) return; updateOv(stream.id,v); setFlash(true); setTimeout(()=>setFlash(false),1400); };
+    const save=()=>{ const v=parseFloat(draft); if(draft===""||isNaN(v)||v<0) return; updateOv(stream.id,v); setVarFlash(f=>({...f,[draftKey]:true})); setTimeout(()=>setVarFlash(f=>{const n={...f};delete n[draftKey];return n;}),1400); };
     const clear=()=>{ setDraft(""); clearOv(stream.id); };
     return <div style={{padding:"12px 0",borderBottom:`1px solid ${T.borderSoft}`}}>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
@@ -833,17 +875,15 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
   </div>;
 
   const AddOneoffForm=()=>{
-    const [open,setOpen]=useState(false);
-    const [name,setName]=useState(""); const [amt,setAmt]=useState("");
-    const submit=()=>{ const v=parseFloat(amt); if(!name.trim()||isNaN(v)||v<=0) return; addOneoff(name.trim(),v); setName("");setAmt("");setOpen(false); };
-    if(!open) return <button onClick={()=>setOpen(true)} style={{width:"100%",padding:"12px",background:"transparent",border:`1px dashed ${T.borderMid}`,borderRadius:12,color:T.textMuted,fontFamily:"inherit",fontSize:13,cursor:"pointer",marginTop:10}}>+ Add one-off income (bonus, refund, gift…)</button>;
+    const submit=()=>{ const v=parseFloat(oneoffAmt); if(!oneoffName.trim()||isNaN(v)||v<=0) return; addOneoff(oneoffName.trim(),v); setOneoffName("");setOneoffAmt("");setAddOneoffOpen(false); };
+    if(!addOneoffOpen) return <button onClick={()=>setAddOneoffOpen(true)} style={{width:"100%",padding:"12px",background:"transparent",border:`1px dashed ${T.borderMid}`,borderRadius:12,color:T.textMuted,fontFamily:"inherit",fontSize:13,cursor:"pointer",marginTop:10}}>+ Add one-off income (bonus, refund, gift…)</button>;
     return <div style={{padding:"12px 0",borderTop:`1px solid ${T.borderSoft}`,display:"flex",flexDirection:"column",gap:8}}>
       <MicroLabel>Add one-off income</MicroLabel>
-      <input placeholder="Name (e.g. Tax refund, Bonus)" value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()} style={{padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"inherit",fontSize:13,outline:"none"}} autoFocus/>
-      <input type="number" inputMode="decimal" placeholder="Amount" value={amt} onChange={e=>setAmt(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()} style={{padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"'DM Mono'",fontSize:13,outline:"none"}}/>
+      <input placeholder="Name (e.g. Tax refund, Bonus)" value={oneoffName} onChange={e=>setOneoffName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()} style={{padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"inherit",fontSize:13,outline:"none"}} autoFocus/>
+      <input type="number" inputMode="decimal" placeholder="Amount" value={oneoffAmt} onChange={e=>setOneoffAmt(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()} style={{padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"'DM Mono'",fontSize:13,outline:"none"}}/>
       <div style={{display:"flex",gap:8}}>
-        <button onClick={submit} disabled={!name.trim()||!amt||parseFloat(amt)<=0} style={{flex:1,padding:"10px",background:name.trim()&&parseFloat(amt)>0?T.accent:T.border,border:"none",borderRadius:10,fontFamily:"inherit",fontWeight:700,fontSize:13,color:name.trim()&&parseFloat(amt)>0?"#fff":T.textMuted,cursor:"pointer"}}>Add</button>
-        <button onClick={()=>{setOpen(false);setName("");setAmt("");}} style={{padding:"10px 18px",background:"transparent",border:`1px solid ${T.borderMid}`,borderRadius:10,fontFamily:"inherit",fontSize:13,color:T.textSecondary,cursor:"pointer"}}>Cancel</button>
+        <button onClick={submit} disabled={!oneoffName.trim()||!oneoffAmt||parseFloat(oneoffAmt)<=0} style={{flex:1,padding:"10px",background:oneoffName.trim()&&parseFloat(oneoffAmt)>0?T.accent:T.border,border:"none",borderRadius:10,fontFamily:"inherit",fontWeight:700,fontSize:13,color:oneoffName.trim()&&parseFloat(oneoffAmt)>0?"#fff":T.textMuted,cursor:"pointer"}}>Add</button>
+        <button onClick={()=>{setAddOneoffOpen(false);setOneoffName("");setOneoffAmt("");}} style={{padding:"10px 18px",background:"transparent",border:`1px solid ${T.borderMid}`,borderRadius:10,fontFamily:"inherit",fontSize:13,color:T.textSecondary,cursor:"pointer"}}>Cancel</button>
       </div>
     </div>;
   };
@@ -882,64 +922,55 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
   // ── REVIEW screen — Tinder-style swipe with undo ─────────────────────────
   const ReviewScreen=()=>{
-    // Local state for swipe
-    const [idx,setIdx]=useState(0);
-    const [decisions,setDecisions]=useState([]); // [{id,kept}]
-    const [drag,setDrag]=useState({x:0,active:false});
-    const [exiting,setExiting]=useState(null); // {id,direction}
-    const [undoToast,setUndoToast]=useState(null);
-    const [keepAllConfirm,setKeepAllConfirm]=useState(false);
-    const cardRef=useRef();
-    const startX=useRef(0);
-    const undoTimer=useRef(null);
+    const cardRef=reviewCardRef;
+    const startX=reviewStartX;
+    const undoTimer=reviewUndoTimer;
     const COLS=getAllCatCols(profile.customCategories);
 
-    const remaining=pendingTxs.filter(t=>!decisions.find(d=>d.id===t.id));
+    const remaining=pendingTxs.filter(t=>!reviewDecisions.find(d=>d.id===t.id));
     const current=remaining[0];
     const next=remaining[1];
     const total=pendingTxs.length;
-    const done=decisions.length;
+    const done=reviewDecisions.length;
     const allDone=done>=total;
 
     const decide=(kept)=>{
-      if(!current||exiting) return;
-      setExiting({id:current.id,direction:kept?"right":"left"});
+      if(!current||reviewExiting) return;
+      setReviewExiting({id:current.id,direction:kept?"right":"left"});
       setTimeout(()=>{
-        const newDecisions=[...decisions,{id:current.id,kept}];
-        setDecisions(newDecisions);
-        setExiting(null); setDrag({x:0,active:false});
-        // Show undo toast
+        setReviewDecisions(d=>[...d,{id:current.id,kept}]);
+        setReviewExiting(null); setReviewDrag({x:0,active:false});
         clearTimeout(undoTimer.current);
-        setUndoToast({tx:current,kept});
-        undoTimer.current=setTimeout(()=>setUndoToast(null),5000);
+        setReviewUndoToast({tx:current,kept});
+        undoTimer.current=setTimeout(()=>setReviewUndoToast(null),5000);
       },220);
     };
     const undo=()=>{
-      if(!undoToast) return;
-      setDecisions(d=>d.filter(x=>x.id!==undoToast.tx.id));
+      if(!reviewUndoToast) return;
+      setReviewDecisions(d=>d.filter(x=>x.id!==reviewUndoToast.tx.id));
       clearTimeout(undoTimer.current);
-      setUndoToast(null);
+      setReviewUndoToast(null);
     };
-    const onTouchStart=e=>{ if(exiting) return; startX.current=e.touches?e.touches[0].clientX:e.clientX; setDrag({x:0,active:true}); };
-    const onTouchMove=e=>{ if(!drag.active||exiting) return; const x=(e.touches?e.touches[0].clientX:e.clientX)-startX.current; setDrag({x,active:true}); };
+    const onTouchStart=e=>{ if(reviewExiting) return; startX.current=e.touches?e.touches[0].clientX:e.clientX; setReviewDrag({x:0,active:true}); };
+    const onTouchMove=e=>{ if(!reviewDrag.active||reviewExiting) return; const x=(e.touches?e.touches[0].clientX:e.clientX)-startX.current; setReviewDrag({x,active:true}); };
     const onTouchEnd=()=>{
-      if(!drag.active||exiting) return;
+      if(!reviewDrag.active||reviewExiting) return;
       const TH=80;
-      if(drag.x>TH) decide(true);
-      else if(drag.x<-TH) decide(false);
-      else setDrag({x:0,active:false});
+      if(reviewDrag.x>TH) decide(true);
+      else if(reviewDrag.x<-TH) decide(false);
+      else setReviewDrag({x:0,active:false});
     };
 
     const finish=async()=>{
-      // Build pendingTxs from decisions
-      const updated=pendingTxs.map(t=>{ const d=decisions.find(x=>x.id===t.id); return {...t,checked:d?d.kept:true}; });
+      const updated=pendingTxs.map(t=>{ const d=reviewDecisions.find(x=>x.id===t.id); return {...t,checked:d?d.kept:true}; });
       setPendingTxs(updated);
-      // Wait a tick then commit
+      setReviewDecisions([]); setReviewKeepAllConfirm(false); setReviewUndoToast(null);
       setTimeout(()=>commitTransactions(),50);
     };
     const keepAll=()=>{
       const updated=pendingTxs.map(t=>({...t,checked:true}));
       setPendingTxs(updated);
+      setReviewDecisions([]); setReviewKeepAllConfirm(false); setReviewUndoToast(null);
       setTimeout(()=>commitTransactions(),50);
     };
 
@@ -952,24 +983,24 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     }
 
     if(allDone){
-      const kept=decisions.filter(d=>d.kept).length;
-      const skipped=decisions.length-kept;
+      const kept=reviewDecisions.filter(d=>d.kept).length;
+      const skipped=reviewDecisions.length-kept;
       return <div style={{padding:"40px 18px",textAlign:"center"}}>
         <div style={{fontSize:48,marginBottom:14}}>🎉</div>
         <div style={{fontSize:24,fontWeight:800,color:T.textPrimary,marginBottom:8,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif",letterSpacing:-0.5}}>All done!</div>
         <div style={{fontSize:14,color:T.textSecondary,marginBottom:24,lineHeight:1.6}}>You kept <span style={{fontWeight:700,color:T.accent}}>{kept}</span> and skipped <span style={{fontWeight:700,color:T.negative}}>{skipped}</span>.</div>
         <Btn onClick={finish} style={{maxWidth:280,margin:"0 auto"}}>Save these transactions</Btn>
-        <button onClick={()=>{setDecisions([]);setIdx(0);}} style={{marginTop:14,background:"none",border:"none",color:T.textMuted,fontSize:13,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}}>Start over</button>
+        <button onClick={()=>{setReviewDecisions([]);}} style={{marginTop:14,background:"none",border:"none",color:T.textMuted,fontSize:13,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}}>Start over</button>
       </div>;
     }
 
-    if(keepAllConfirm){
+    if(reviewKeepAllConfirm){
       return <div style={{padding:"40px 18px",textAlign:"center"}}>
         <div style={{fontSize:42,marginBottom:14}}>📋</div>
         <div style={{fontSize:20,fontWeight:700,color:T.textPrimary,marginBottom:8,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>Keep all {total - done}?</div>
         <div style={{fontSize:13,color:T.textSecondary,marginBottom:24,maxWidth:300,margin:"0 auto",lineHeight:1.6}}>This skips review and saves everything. You can still edit or delete later.</div>
         <div style={{display:"flex",gap:10,maxWidth:280,margin:"0 auto"}}>
-          <Btn variant="ghost" onClick={()=>setKeepAllConfirm(false)} size="sm">Cancel</Btn>
+          <Btn variant="ghost" onClick={()=>setReviewKeepAllConfirm(false)} size="sm">Cancel</Btn>
           <Btn onClick={keepAll} size="sm">Keep all</Btn>
         </div>
       </div>;
@@ -977,37 +1008,32 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
     if(!current) return null;
 
-    const rotation=drag.x*0.06;
-    const tint=drag.x>0?T.accent:drag.x<0?T.negative:null;
-    const tintOpacity=Math.min(0.18,Math.abs(drag.x)/250);
+    const rotation=reviewDrag.x*0.06;
+    const tint=reviewDrag.x>0?T.accent:reviewDrag.x<0?T.negative:null;
+    const tintOpacity=Math.min(0.18,Math.abs(reviewDrag.x)/250);
     const isCredit=current.amount<0;
 
     return <div style={{padding:"0 18px"}}>
-      {/* Progress bar */}
       <div style={{marginBottom:18}}>
         <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:T.textMuted,marginBottom:6,fontFamily:"'DM Mono'",fontWeight:600}}>
           <span>{done} OF {total}</span>
-          <button onClick={()=>setKeepAllConfirm(true)} style={{background:"none",border:"none",color:T.accent,fontSize:11,cursor:"pointer",fontFamily:"'DM Mono'",fontWeight:600,padding:0}}>SKIP REVIEW →</button>
+          <button onClick={()=>setReviewKeepAllConfirm(true)} style={{background:"none",border:"none",color:T.accent,fontSize:11,cursor:"pointer",fontFamily:"'DM Mono'",fontWeight:600,padding:0}}>SKIP REVIEW →</button>
         </div>
         <div style={{height:4,background:T.borderSoft,borderRadius:4,overflow:"hidden"}}>
           <div style={{height:"100%",width:`${(done/total)*100}%`,background:T.accent,borderRadius:4,transition:"width .25s"}}/>
         </div>
       </div>
 
-      {/* Card stack (current + next behind) */}
       <div style={{position:"relative",height:380,marginBottom:24}}>
         {next&&<div style={{position:"absolute",top:8,left:6,right:6,bottom:0,background:T.surface,border:`1px solid ${T.border}`,borderRadius:22,boxShadow:T.cardShadow,opacity:0.5,transform:"scale(0.96)"}}/>}
         <div ref={cardRef}
-             onMouseDown={onTouchStart} onMouseMove={drag.active?onTouchMove:undefined} onMouseUp={onTouchEnd} onMouseLeave={drag.active?onTouchEnd:undefined}
+             onMouseDown={onTouchStart} onMouseMove={reviewDrag.active?onTouchMove:undefined} onMouseUp={onTouchEnd} onMouseLeave={reviewDrag.active?onTouchEnd:undefined}
              onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
-             style={{position:"absolute",inset:0,background:T.surface,border:`1px solid ${T.border}`,borderRadius:22,padding:22,boxShadow:T.cardShadow,cursor:exiting?"default":"grab",transform:exiting?`translateX(${exiting.direction==="right"?500:-500}px) rotate(${exiting.direction==="right"?20:-20}deg)`:`translateX(${drag.x}px) rotate(${rotation}deg)`,transition:exiting?"transform .22s ease-out":drag.active?"none":"transform .2s",userSelect:"none",touchAction:"pan-y"}}>
-          {/* Decision tint overlay */}
+             style={{position:"absolute",inset:0,background:T.surface,border:`1px solid ${T.border}`,borderRadius:22,padding:22,boxShadow:T.cardShadow,cursor:reviewExiting?"default":"grab",transform:reviewExiting?`translateX(${reviewExiting.direction==="right"?500:-500}px) rotate(${reviewExiting.direction==="right"?20:-20}deg)`:`translateX(${reviewDrag.x}px) rotate(${rotation}deg)`,transition:reviewExiting?"transform .22s ease-out":reviewDrag.active?"none":"transform .2s",userSelect:"none",touchAction:"pan-y"}}>
           {tint&&<div style={{position:"absolute",inset:0,background:tint,opacity:tintOpacity,borderRadius:22,pointerEvents:"none"}}/>}
-          {/* KEEP / SKIP labels */}
-          {drag.x>30&&<div style={{position:"absolute",top:24,left:24,padding:"6px 14px",border:`3px solid ${T.accent}`,borderRadius:8,color:T.accent,fontSize:18,fontWeight:800,transform:"rotate(-10deg)",letterSpacing:1}}>KEEP</div>}
-          {drag.x<-30&&<div style={{position:"absolute",top:24,right:24,padding:"6px 14px",border:`3px solid ${T.negative}`,borderRadius:8,color:T.negative,fontSize:18,fontWeight:800,transform:"rotate(10deg)",letterSpacing:1}}>SKIP</div>}
+          {reviewDrag.x>30&&<div style={{position:"absolute",top:24,left:24,padding:"6px 14px",border:`3px solid ${T.accent}`,borderRadius:8,color:T.accent,fontSize:18,fontWeight:800,transform:"rotate(-10deg)",letterSpacing:1}}>KEEP</div>}
+          {reviewDrag.x<-30&&<div style={{position:"absolute",top:24,right:24,padding:"6px 14px",border:`3px solid ${T.negative}`,borderRadius:8,color:T.negative,fontSize:18,fontWeight:800,transform:"rotate(10deg)",letterSpacing:1}}>SKIP</div>}
 
-          {/* Card content */}
           <div style={{height:"100%",display:"flex",flexDirection:"column"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
               <div style={{fontSize:11,color:T.textMuted,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.5}}>{current.date}</div>
@@ -1024,7 +1050,6 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         </div>
       </div>
 
-      {/* Action buttons */}
       <div style={{display:"flex",gap:14,justifyContent:"center",marginBottom:14}}>
         <button onClick={()=>decide(false)} style={{width:64,height:64,borderRadius:32,background:T.surface,border:`2px solid ${T.negative}40`,color:T.negative,fontSize:28,cursor:"pointer",fontFamily:"inherit",boxShadow:T.cardShadow,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
         <select value={current.category} onChange={e=>{ setPendingTxs(p=>p.map(t=>t.id===current.id?{...t,category:e.target.value}:t)); }} style={{padding:"0 18px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:32,color:T.textSecondary,fontFamily:"inherit",fontSize:12,cursor:"pointer",outline:"none"}}>{[...CATS,...FIXED_CATS].map(c=><option key={c}>{c}</option>)}</select>
@@ -1032,22 +1057,12 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       </div>
       <div style={{textAlign:"center",fontSize:11,color:T.textMuted}}>Swipe right to keep · left to skip</div>
 
-      {/* Undo toast */}
-      {undoToast&&<div style={{position:"fixed",bottom:108,left:"50%",transform:"translateX(-50%)",background:T.textPrimary,color:T.surface,borderRadius:24,padding:"10px 14px 10px 22px",fontSize:13,zIndex:3000,display:"flex",alignItems:"center",gap:14,boxShadow:"0 12px 32px rgba(0,0,0,0.3)"}}>
-        <span>{undoToast.kept?"✓ Kept":"✕ Skipped"} {undoToast.tx.description.slice(0,18)}{undoToast.tx.description.length>18?"…":""}</span>
+      {reviewUndoToast&&<div style={{position:"fixed",bottom:108,left:"50%",transform:"translateX(-50%)",background:T.textPrimary,color:T.surface,borderRadius:24,padding:"10px 14px 10px 22px",fontSize:13,zIndex:3000,display:"flex",alignItems:"center",gap:14,boxShadow:"0 12px 32px rgba(0,0,0,0.3)"}}>
+        <span>{reviewUndoToast.kept?"✓ Kept":"✕ Skipped"} {reviewUndoToast.tx.description.slice(0,18)}{reviewUndoToast.tx.description.length>18?"…":""}</span>
         <button onClick={undo} style={{background:"none",border:"none",color:T.accent,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:"4px 8px"}}>UNDO</button>
       </div>}
     </div>;
   };
-  const [youSection,setYouSection]=useState(null);
-  const [pName,setPName]=useState(profile.name||"");
-  const [pOcc,setPOcc]=useState(profile.occupation||"");
-  const [pCurrency,setPCurrency]=useState(profile.currency||"SGD");
-  const [pStartMonth,setPStartMonth]=useState(profile.startMonth||currentMonth());
-  useEffect(()=>{ setPName(profile.name||""); setPOcc(profile.occupation||""); setPCurrency(profile.currency||"SGD"); setPStartMonth(profile.startMonth||currentMonth()); },[profile]);
-
-  const avatarRef=useRef();
-  const restoreFileRef=useRef();
   const handleAvatarUpload=e=>{
     const f=e.target.files[0]; if(!f) return;
     const r=new FileReader();
@@ -1109,15 +1124,15 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
   };
 
   const IncomeBillsSection=()=>{
-    const [draft,setDraft]=useState(profile);
-    useEffect(()=>setDraft(profile),[profile.incomeStreams,profile.fixedCommitments]);
+    const draft=ibDraft||profile;
+    const setDraft=updater=>{ const nv=typeof updater==="function"?updater(draft):updater; setIbDraft(nv); };
     const updS=(id,field,val)=>setDraft(p=>({...p,incomeStreams:(p.incomeStreams||[]).map(s=>s.id===id?{...s,[field]:val}:s)}));
     const addS=()=>setDraft(p=>({...p,incomeStreams:[...(p.incomeStreams||[]),{id:`s${Date.now()}`,name:"",type:"fixed",defaultAmount:0,active:true,startFrom:""}]}));
     const rmS=id=>setDraft(p=>({...p,incomeStreams:(p.incomeStreams||[]).filter(s=>s.id!==id)}));
     const updF=(id,field,val)=>setDraft(p=>({...p,fixedCommitments:(p.fixedCommitments||[]).map(c=>c.id===id?{...c,[field]:val}:c)}));
     const addF=()=>setDraft(p=>({...p,fixedCommitments:[...(p.fixedCommitments||[]),{id:`c${Date.now()}`,name:"",amount:0,startFrom:"",endMonth:""}]}));
     const rmF=id=>setDraft(p=>({...p,fixedCommitments:(p.fixedCommitments||[]).filter(c=>c.id!==id)}));
-    const save=()=>{ saveProfile({...draft,onboarded:true}); showToast("✓ Saved"); setYouSection(null); };
+    const save=()=>{ saveProfile({...draft,onboarded:true}); setIbDraft(null); showToast("✓ Saved"); setYouSection(null); };
     const inpS={padding:"9px 11px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:9,color:T.textPrimary,fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",boxSizing:"border-box"};
     return <div style={{padding:"14px 16px",borderTop:`1px solid ${T.borderSoft}`}}>
       <div style={{fontSize:11,color:T.textMuted,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",marginBottom:8}}>Income sources</div>
@@ -1153,12 +1168,12 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
   };
 
   const GoalsSection=()=>{
-    const [draft,setDraft]=useState(profile);
-    useEffect(()=>setDraft(profile),[profile.goals]);
+    const draft=goalsDraft||profile;
+    const setDraft=updater=>{ const nv=typeof updater==="function"?updater(draft):updater; setGoalsDraft(nv); };
     const upd=(id,f,v)=>setDraft(p=>({...p,goals:(p.goals||[]).map(g=>g.id===id?{...g,[f]:v}:g)}));
     const add=()=>setDraft(p=>({...p,goals:[...(p.goals||[]),{id:`g${Date.now()}`,name:"",target:0,date:"",startingBalance:0}]}));
     const rm=id=>setDraft(p=>({...p,goals:(p.goals||[]).filter(g=>g.id!==id)}));
-    const save=()=>{ saveProfile({...draft}); showToast("✓ Goals saved"); setYouSection(null); };
+    const save=()=>{ saveProfile({...draft}); setGoalsDraft(null); showToast("✓ Goals saved"); setYouSection(null); };
     const inpS={padding:"9px 11px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:9,color:T.textPrimary,fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",boxSizing:"border-box"};
     return <div style={{padding:"14px 16px",borderTop:`1px solid ${T.borderSoft}`}}>
       {(draft.goals||[]).length===0&&<div style={{fontSize:12,color:T.textMuted,marginBottom:12,padding:"10px 12px",background:T.surface2,borderRadius:10}}>Set savings targets like "Emergency fund" or "Trip to Japan". Track progress as you save.</div>}
@@ -1247,23 +1262,23 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
       <SettingsGroup title="Profile">
         <SettingsRow icon="👤" label="Identity" desc={`${profile.name||"Anonymous"}${profile.occupation?` · ${profile.occupation}`:""} · ${profile.currency}`} onClick={()=>setYouSection(youSection==="identity"?null:"identity")}/>
-        {youSection==="identity"&&<IdentitySection/>}
+        {youSection==="identity"&&IdentitySection()}
         <SettingsRow icon="💰" label="Income & Bills" desc={`${(profile.incomeStreams||[]).length} sources · ${(profile.fixedCommitments||[]).length} bills`} onClick={()=>setYouSection(youSection==="incomebills"?null:"incomebills")}/>
-        {youSection==="incomebills"&&<IncomeBillsSection/>}
+        {youSection==="incomebills"&&IncomeBillsSection()}
         <SettingsRow icon="🎯" label="Goals" desc={(profile.goals||[]).length>0?`${(profile.goals||[]).length} active`:"No goals set yet"} onClick={()=>setYouSection(youSection==="goals"?null:"goals")}/>
-        {youSection==="goals"&&<GoalsSection/>}
+        {youSection==="goals"&&GoalsSection()}
       </SettingsGroup>
 
       <SettingsGroup title="Appearance">
         <SettingsRow icon="🎨" label="Theme" desc={`${LIGHT_PRESETS.concat(DARK_PRESETS).find(p=>p.accent===youAccent&&p.bg===youBg)?.name||"Custom"}`} onClick={()=>setYouSection(youSection==="theme"?null:"theme")}/>
-        {youSection==="theme"&&<ThemeSection/>}
+        {youSection==="theme"&&ThemeSection()}
       </SettingsGroup>
 
       <SettingsGroup title="Privacy & Data">
         <SettingsRow icon="🔒" label="Privacy policy" desc="What we do (and don't) with your data" onClick={()=>setShowPrivacy(true)}/>
         <SettingsRow icon="ℹ" label="About this app" desc="Version & landing page" onClick={()=>{window.location.href="/landing";}}/>
         <SettingsRow icon="⚙" label="Advanced — backup, restore, reset" desc={`${txCount} transactions stored locally`} onClick={()=>setYouSection(youSection==="advanced"?null:"advanced")}/>
-        {youSection==="advanced"&&<AdvancedSection/>}
+        {youSection==="advanced"&&AdvancedSection()}
       </SettingsGroup>
 
       <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginTop:18,fontSize:10,color:T.textMuted,letterSpacing:0.5}}>
@@ -1361,7 +1376,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
     {/* Donut */}
     {byCat.length>0&&<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:18,marginBottom:12,display:"flex",alignItems:"center",gap:16,boxShadow:T.cardShadow}}>
-      <DonutChart/>
+      {DonutChart()}
       <div style={{flex:1,fontSize:11,minWidth:0}}>
         {byCat.slice(0,5).map(([cat,amt],i)=><div key={i} style={{display:"flex",alignItems:"center",gap:7,marginBottom:6}}>
           <div style={{width:8,height:8,borderRadius:4,background:COLS[cat]||T.accent,flexShrink:0}}/>
@@ -1382,7 +1397,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         return <VarIncomeRow key={stream.id} stream={stream} amount={amount}/>;
       })}
       {oneoffEntries.map(o=><OneoffRow key={o.id} entry={o}/>)}
-      <AddOneoffForm/>
+      {AddOneoffForm()}
     </div>}
 
     {/* Bills card */}
@@ -1579,9 +1594,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       {id:3,label:uploadTxCount>0?`Categorising ${uploadTxCount} transactions`:"Categorising by merchant"},
       {id:4,label:"Ready for review"},
     ];
-    const [manualOpen,setManualOpen]=useState(false);
-    const [mDesc,setMDesc]=useState(""); const [mAmt,setMAmt]=useState(""); const [mCat,setMCat]=useState(CATS[0]||"📦 Other"); const [mDate,setMDate]=useState(todayStr());
-    const submitManual=()=>{ addManual({description:mDesc,amount:mAmt,category:mCat,date:mDate}); };
+    const submitManual=()=>{ addManual({description:manualDesc,amount:manualAmt,category:manualCat||CATS[0]||"📦 Other",date:manualDate}); setManualDesc("");setManualAmt("");setManualOpen(false); };
 
     return <div>
       {!uploading&&uploadStep===0
@@ -1633,10 +1646,10 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           <span style={{fontSize:14,color:T.textMuted}}>{manualOpen?"▲":"▼"}</span>
         </button>
         {manualOpen&&<div style={{marginTop:14,display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <input type="text" placeholder="Description" value={mDesc} onChange={e=>setMDesc(e.target.value)} style={{gridColumn:"1/-1",padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"inherit",fontSize:13,outline:"none"}}/>
-          <input type="number" placeholder="Amount" value={mAmt} onChange={e=>setMAmt(e.target.value)} style={{padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"'DM Mono'",fontSize:13,outline:"none"}}/>
-          <input type="date" value={mDate} onChange={e=>setMDate(e.target.value)} style={{padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"inherit",fontSize:13,outline:"none"}}/>
-          <select value={mCat} onChange={e=>setMCat(e.target.value)} style={{gridColumn:"1/-1",padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"inherit",fontSize:13,outline:"none"}}>{[...CATS,...FIXED_CATS].map(c=><option key={c}>{c}</option>)}</select>
+          <input type="text" placeholder="Description" value={manualDesc} onChange={e=>setManualDesc(e.target.value)} style={{gridColumn:"1/-1",padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"inherit",fontSize:13,outline:"none"}}/>
+          <input type="number" placeholder="Amount" value={manualAmt} onChange={e=>setManualAmt(e.target.value)} style={{padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"'DM Mono'",fontSize:13,outline:"none"}}/>
+          <input type="date" value={manualDate} onChange={e=>setManualDate(e.target.value)} style={{padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"inherit",fontSize:13,outline:"none"}}/>
+          <select value={manualCat||CATS[0]||"📦 Other"} onChange={e=>setManualCat(e.target.value)} style={{gridColumn:"1/-1",padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"inherit",fontSize:13,outline:"none"}}>{[...CATS,...FIXED_CATS].map(c=><option key={c}>{c}</option>)}</select>
           <Btn onClick={submitManual} style={{gridColumn:"1/-1"}} size="sm">Add transaction</Btn>
         </div>}
       </div>}
@@ -1706,10 +1719,10 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
               {subScreen==="upload"?"Add transactions":subScreen==="review"?"Quick review":subScreen==="forecast"?"Forecast":subScreen==="subscriptions"?"Subscriptions":""}
             </div>
           </div>
-          {subScreen==="upload"&&<UploadScreen/>}
-          {subScreen==="subscriptions"&&<SubscriptionsScreen/>}
-          {subScreen==="forecast"&&<ForecastScreen/>}
-          {subScreen==="review"&&<ReviewScreen/>}
+          {subScreen==="upload"&&UploadScreen()}
+          {subScreen==="subscriptions"&&SubscriptionsScreen()}
+          {subScreen==="forecast"&&ForecastScreen()}
+          {subScreen==="review"&&ReviewScreen()}
         </div>
       </div>}
 
@@ -1723,9 +1736,9 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
       {/* Main content */}
       <div style={{maxWidth:580,margin:"0 auto",paddingBottom:96}}>
-        {tab==="home"&&<HomeContent/>}
-        {tab==="money"&&<MoneyContent/>}
-        {tab==="you"&&<YouContent/>}
+        {tab==="home"&&HomeContent()}
+        {tab==="money"&&MoneyContent()}
+        {tab==="you"&&YouContent()}
       </div>
 
       {/* Bottom tab bar with floating + button */}
