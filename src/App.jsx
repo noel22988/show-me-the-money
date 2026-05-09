@@ -518,6 +518,14 @@ export default function App(){
   // VarIncomeRow drafts and flash state — keyed by stream id
   const [varDrafts,setVarDrafts]=useState({});
   const [varFlash,setVarFlash]=useState({});
+  // Home "Things to do" expand
+  const [todosExpanded,setTodosExpanded]=useState(false);
+  // Quick Add sheet (from + button)
+  const [addMode,setAddMode]=useState("choose"); // "choose" | "quick"
+  const [qaDesc,setQaDesc]=useState("");
+  const [qaAmt,setQaAmt]=useState("");
+  const [qaCat,setQaCat]=useState("");
+  const [qaDate,setQaDate]=useState(todayStr());
   // ReviewScreen refs
   const reviewCardRef=useRef();
   const reviewStartX=useRef(0);
@@ -558,6 +566,30 @@ export default function App(){
     const fix=(md.fixedOverrides||profile?.fixedCommitments||[]).filter(c=>(!c.startFrom||m>=c.startFrom)&&(!c.endMonth||m<=c.endMonth)).reduce((s,c)=>s+(+c.amount||0),0);
     return total+(inc-spent-fix);
   },0),[monthlyData,streams,profile]);
+
+  // Last 6 months of savings (oldest → newest, ending at selectedMonth)
+  const monthlySavings=useMemo(()=>{
+    const out=[];
+    const [y,mo]=selectedMonth.split("-").map(Number);
+    for(let i=5;i>=0;i--){
+      const d=new Date(y,mo-1-i,1);
+      const m=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+      if(profile?.startMonth&&m<profile.startMonth) continue;
+      const md=monthlyData[m]||{txs:[],incomeOverrides:{}};
+      const inc=totalIncome(streams,md.incomeOverrides||{},m);
+      const spent=(md.txs||[]).reduce((s,t)=>s+t.amount,0);
+      const fix=(md.fixedOverrides||profile?.fixedCommitments||[]).filter(c=>(!c.startFrom||m>=c.startFrom)&&(!c.endMonth||m<=c.endMonth)).reduce((s,c)=>s+(+c.amount||0),0);
+      const isCurrent=m===currentMonth();
+      // For current month, also compute projected
+      let projected=null;
+      if(isCurrent){
+        const today=new Date(); const dom=today.getDate(); const dim=new Date(today.getFullYear(),today.getMonth()+1,0).getDate();
+        if(dom>5&&inc>0){ const projSpent=spent*(dim/dom); projected=inc-fix-projSpent; }
+      }
+      out.push({month:m,saved:inc-spent-fix,projected,isCurrent,hasData:(md.txs||[]).length>0||Object.keys(md.incomeOverrides||{}).length>0});
+    }
+    return out;
+  },[monthlyData,streams,profile,selectedMonth]);
 
   // ── Handlers (upload, transactions, income) ────────────────────────────────
   const saveMD=async(month,updates)=>{
@@ -603,9 +635,8 @@ export default function App(){
     if(profile?.startMonth&&month<profile.startMonth){ showToast("⚠ Before your start month"); return; }
     const ex=(monthlyData[month]||{}).txs||[];
     await saveMD(month,{txs:[tx,...ex]});
-    showToast("Transaction added");
+    showToast(`✓ Added ${tx.description}`);
     if(month!==selectedMonth) setSelectedMonth(month);
-    setSubScreen(null);
   };
 
   const CATS=getAllCats(profile?.customCategories);
@@ -837,20 +868,19 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     const isSaved=amount!==null&&amount!==undefined;
     const setDraft=v=>setVarDrafts(d=>({...d,[draftKey]:v}));
     const dirty=isSaved?String(amount)!==String(parseFloat(draft)):draft.trim()!=="";
-    const save=()=>{ const v=parseFloat(draft); if(draft===""||isNaN(v)||v<0) return; updateOv(stream.id,v); setVarFlash(f=>({...f,[draftKey]:true})); setTimeout(()=>setVarFlash(f=>{const n={...f};delete n[draftKey];return n;}),1400); };
+    const save=()=>{ if(!dirty) return; const v=parseFloat(draft); if(draft===""||isNaN(v)||v<0) return; updateOv(stream.id,v); setVarFlash(f=>({...f,[draftKey]:true})); setTimeout(()=>setVarFlash(f=>{const n={...f};delete n[draftKey];return n;}),1600); };
     const clear=()=>{ setDraft(""); clearOv(stream.id); };
     return <div style={{padding:"12px 0",borderBottom:`1px solid ${T.borderSoft}`}}>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
         <div style={{width:8,height:8,borderRadius:"50%",background:T.warning,flexShrink:0}}/>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>{stream.name}</div>
-          <div style={{fontSize:10,color:T.warning,fontFamily:"'DM Mono'",fontWeight:600}}>VARIABLE{!isSaved?" · needs amount":""}</div>
+          <div style={{fontSize:10,color:flash?T.positive:T.warning,fontFamily:"'DM Mono'",fontWeight:600,transition:"color .2s"}}>{flash?"✓ SAVED":`VARIABLE${!isSaved?" · needs amount":""}`}</div>
         </div>
       </div>
       <div style={{display:"flex",gap:8}}>
-        <input type="number" inputMode="decimal" placeholder="Enter amount" value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){save();e.target.blur();}}} style={{flex:1,padding:"9px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"'DM Mono'",fontSize:13,outline:"none"}}/>
-        <button onClick={save} disabled={!dirty} style={{padding:"9px 14px",background:flash?T.positive:dirty?T.accent:T.border,border:"none",borderRadius:10,fontFamily:"inherit",fontWeight:700,fontSize:12,color:flash||dirty?"#fff":T.textMuted,cursor:dirty?"pointer":"default",whiteSpace:"nowrap",transition:"background .2s"}}>{flash?"✓":isSaved?"Update":"Save"}</button>
-        {isSaved&&<button onClick={clear} style={{padding:"9px 12px",background:"transparent",border:`1px solid ${T.borderMid}`,borderRadius:10,fontFamily:"inherit",fontSize:14,color:T.textSecondary,cursor:"pointer"}}>×</button>}
+        <input type="number" inputMode="decimal" placeholder="Enter amount" value={draft} onChange={e=>setDraft(e.target.value)} onBlur={save} onKeyDown={e=>{if(e.key==="Enter"){save();e.target.blur();}}} style={{flex:1,padding:"10px 12px",background:flash?T.accentSoft:T.surface2,border:`1px solid ${flash?T.accent:T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"'DM Mono'",fontSize:14,fontWeight:600,outline:"none",transition:"all .2s"}}/>
+        {isSaved&&<button onClick={clear} title="Clear" style={{padding:"10px 12px",background:"transparent",border:`1px solid ${T.borderMid}`,borderRadius:10,fontFamily:"inherit",fontSize:14,color:T.textSecondary,cursor:"pointer"}}>×</button>}
       </div>
     </div>;
   };
@@ -942,7 +972,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         setReviewExiting(null); setReviewDrag({x:0,active:false});
         clearTimeout(undoTimer.current);
         setReviewUndoToast({tx:current,kept});
-        undoTimer.current=setTimeout(()=>setReviewUndoToast(null),5000);
+        undoTimer.current=setTimeout(()=>setReviewUndoToast(null),8000);
       },220);
     };
     const undo=()=>{
@@ -1132,9 +1162,9 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     const updF=(id,field,val)=>setDraft(p=>({...p,fixedCommitments:(p.fixedCommitments||[]).map(c=>c.id===id?{...c,[field]:val}:c)}));
     const addF=()=>setDraft(p=>({...p,fixedCommitments:[...(p.fixedCommitments||[]),{id:`c${Date.now()}`,name:"",amount:0,startFrom:"",endMonth:""}]}));
     const rmF=id=>setDraft(p=>({...p,fixedCommitments:(p.fixedCommitments||[]).filter(c=>c.id!==id)}));
-    const save=()=>{ saveProfile({...draft,onboarded:true}); setIbDraft(null); showToast("✓ Saved"); setYouSection(null); };
+    const save=()=>{ saveProfile({...draft,onboarded:true}); setIbDraft(null); showToast("✓ Saved"); setSubScreen(null); };
     const inpS={padding:"9px 11px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:9,color:T.textPrimary,fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",boxSizing:"border-box"};
-    return <div style={{padding:"14px 16px",borderTop:`1px solid ${T.borderSoft}`}}>
+    return <div style={{padding:"4px 0"}}>
       <div style={{fontSize:11,color:T.textMuted,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",marginBottom:8}}>Income sources</div>
       {(draft.incomeStreams||[]).map(s=><div key={s.id} style={{padding:"10px",background:T.surface2,borderRadius:12,marginBottom:8,border:`1px solid ${T.borderSoft}`}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,marginBottom:8,alignItems:"center"}}>
@@ -1163,7 +1193,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       </div>)}
       <button onClick={addF} style={{width:"100%",padding:"10px",background:"transparent",border:`1px dashed ${T.borderMid}`,borderRadius:10,color:T.textMuted,fontFamily:"inherit",fontSize:12,cursor:"pointer",marginBottom:14}}>+ Add bill</button>
 
-      <Btn onClick={save} size="sm">Save changes</Btn>
+      <Btn onClick={save}>Save changes</Btn>
     </div>;
   };
 
@@ -1173,9 +1203,9 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     const upd=(id,f,v)=>setDraft(p=>({...p,goals:(p.goals||[]).map(g=>g.id===id?{...g,[f]:v}:g)}));
     const add=()=>setDraft(p=>({...p,goals:[...(p.goals||[]),{id:`g${Date.now()}`,name:"",target:0,date:"",startingBalance:0}]}));
     const rm=id=>setDraft(p=>({...p,goals:(p.goals||[]).filter(g=>g.id!==id)}));
-    const save=()=>{ saveProfile({...draft}); setGoalsDraft(null); showToast("✓ Goals saved"); setYouSection(null); };
+    const save=()=>{ saveProfile({...draft}); setGoalsDraft(null); showToast("✓ Goals saved"); setSubScreen(null); };
     const inpS={padding:"9px 11px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:9,color:T.textPrimary,fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",boxSizing:"border-box"};
-    return <div style={{padding:"14px 16px",borderTop:`1px solid ${T.borderSoft}`}}>
+    return <div style={{padding:"4px 0"}}>
       {(draft.goals||[]).length===0&&<div style={{fontSize:12,color:T.textMuted,marginBottom:12,padding:"10px 12px",background:T.surface2,borderRadius:10}}>Set savings targets like "Emergency fund" or "Trip to Japan". Track progress as you save.</div>}
       {(draft.goals||[]).map(g=><div key={g.id} style={{padding:"10px",background:T.surface2,borderRadius:12,marginBottom:8,border:`1px solid ${T.borderSoft}`}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,marginBottom:8,alignItems:"center"}}>
@@ -1189,7 +1219,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         <div><div style={{fontSize:10,color:T.textMuted,marginBottom:3}}>Already saved (head-start)</div><input type="number" placeholder="0" value={g.startingBalance||""} onChange={e=>upd(g.id,"startingBalance",parseFloat(e.target.value)||0)} style={inpS}/></div>
       </div>)}
       <button onClick={add} style={{width:"100%",padding:"10px",background:"transparent",border:`1px dashed ${T.borderMid}`,borderRadius:10,color:T.textMuted,fontFamily:"inherit",fontSize:12,cursor:"pointer",marginBottom:12}}>+ Add goal</button>
-      <Btn onClick={save} size="sm">Save changes</Btn>
+      <Btn onClick={save}>Save changes</Btn>
     </div>;
   };
 
@@ -1199,7 +1229,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       <div style={{background:p.bg,padding:"14px"}}><div style={{width:18,height:18,borderRadius:"50%",background:p.accent,marginBottom:7}}/><div style={{height:2,background:p.accent,borderRadius:2,opacity:.5,marginBottom:3}}/><div style={{height:2,background:p.accent,borderRadius:2,opacity:.2,width:"55%"}}/></div>
       <div style={{background:isLight(p.bg)?mixHex(p.bg,"#000000",0.05):mixHex(p.bg,"#ffffff",0.05),padding:"6px 10px",fontSize:11,color:isLight(p.bg)?"#555":"#aaa",fontFamily:"'DM Mono'"}}>{p.name}</div>
     </div>; };
-    return <div style={{padding:"14px 16px",borderTop:`1px solid ${T.borderSoft}`}}>
+    return <div style={{padding:"4px 0"}}>
       <div style={{fontSize:11,color:T.textMuted,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",marginBottom:8}}>Light</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:14}}>{LIGHT_PRESETS.map(rp)}</div>
       <div style={{fontSize:11,color:T.textMuted,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",marginBottom:8}}>Dark</div>
@@ -1209,25 +1239,27 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
   const AdvancedSection=()=>{
     const ab=lsLoad("autoBackups")||[];
-    return <div style={{padding:"6px 0 14px",borderTop:`1px solid ${T.borderSoft}`}}>
-      <SettingsRow icon="⬇" label="Export transactions as CSV" desc={`${txCount} transactions, ${moCount} months`} onClick={()=>txCount>0?exportCSV(monthlyData):showToast("No data to export")}/>
-      <SettingsRow icon="💾" label="Download full backup (JSON)" desc="All data, settings, history" onClick={()=>{dlBackup(profile,monthlyData,eh,ch,insights,archive);showToast("Backup downloaded");}}/>
-      <SettingsRow icon="↑" label="Restore from backup" desc="Load a previous JSON backup" onClick={()=>restoreFileRef.current.click()}/>
-      <SettingsRow icon="🔐" label="Change / Remove PIN" desc="Reset PIN on next open" onClick={()=>{ lsSave("pinHash",null); setPinHash(null); setPinUnlocked(false); setPinSkipped(false); }}/>
-      {ab.length>0&&<div style={{padding:"10px 16px",fontSize:10,color:T.textMuted,fontFamily:"'DM Mono'",letterSpacing:0.5,borderTop:`1px solid ${T.borderSoft}`}}>{ab.length} AUTO-BACKUP{ab.length!==1?"S":""} AVAILABLE</div>}
-      {ab.slice(0,3).map((snap,i)=>{
-        const date=new Date(snap.createdAt);
-        return <div key={i} style={{padding:"10px 16px",borderTop:`1px solid ${T.borderSoft}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <div>
-            <div style={{fontSize:12,color:T.textPrimary,fontWeight:500}}>{date.toLocaleDateString("en-SG",{day:"numeric",month:"short"})} · {date.toLocaleTimeString("en-SG",{hour:"2-digit",minute:"2-digit"})}</div>
-            <div style={{fontSize:10,color:T.textMuted}}>{countAllTx(snap.monthlyData||{})} transactions</div>
-          </div>
-          <button onClick={()=>setRestoreCandidate(snap)} style={{padding:"5px 12px",background:T.accentSoft,border:`1px solid ${T.accentBorder}`,borderRadius:8,color:T.accent,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>Restore</button>
-        </div>;
-      })}
-      <div style={{padding:"14px 16px",borderTop:`1px solid ${T.borderSoft}`}}>
-        <button onClick={()=>setShowReset(true)} style={{width:"100%",padding:"12px",background:"transparent",border:`1px solid ${T.negative}40`,borderRadius:12,color:T.negative,fontFamily:"inherit",fontSize:13,fontWeight:600,cursor:"pointer"}}>Reset everything & start again</button>
+    return <div style={{padding:"4px 0"}}>
+      <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,overflow:"hidden",marginBottom:14,boxShadow:T.cardShadow}}>
+        <SettingsRow icon="⬇" label="Export transactions as CSV" desc={`${txCount} transactions, ${moCount} months`} onClick={()=>txCount>0?exportCSV(monthlyData):showToast("No data to export")}/>
+        <SettingsRow icon="💾" label="Download full backup (JSON)" desc="All data, settings, history" onClick={()=>{dlBackup(profile,monthlyData,eh,ch,insights,archive);showToast("Backup downloaded");}}/>
+        <SettingsRow icon="↑" label="Restore from backup" desc="Load a previous JSON backup" onClick={()=>restoreFileRef.current.click()}/>
+        <SettingsRow icon="🔐" label="Change / Remove PIN" desc="Reset PIN on next open" onClick={()=>{ lsSave("pinHash",null); setPinHash(null); setPinUnlocked(false); setPinSkipped(false); }}/>
       </div>
+      {ab.length>0&&<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,overflow:"hidden",marginBottom:14,boxShadow:T.cardShadow}}>
+        <div style={{padding:"14px 16px 6px",fontSize:11,color:T.textMuted,fontWeight:700,letterSpacing:0.7,textTransform:"uppercase"}}>{ab.length} auto-backup{ab.length!==1?"s":""} available</div>
+        {ab.slice(0,3).map((snap,i)=>{
+          const date=new Date(snap.createdAt);
+          return <div key={i} style={{padding:"12px 16px",borderTop:`1px solid ${T.borderSoft}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div>
+              <div style={{fontSize:13,color:T.textPrimary,fontWeight:500}}>{date.toLocaleDateString("en-SG",{day:"numeric",month:"short"})} · {date.toLocaleTimeString("en-SG",{hour:"2-digit",minute:"2-digit"})}</div>
+              <div style={{fontSize:11,color:T.textMuted,marginTop:2}}>{countAllTx(snap.monthlyData||{})} transactions</div>
+            </div>
+            <button onClick={()=>setRestoreCandidate(snap)} style={{padding:"6px 14px",background:T.accentSoft,border:`1px solid ${T.accentBorder}`,borderRadius:8,color:T.accent,fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>Restore</button>
+          </div>;
+        })}
+      </div>}
+      <button onClick={()=>setShowReset(true)} style={{width:"100%",padding:"14px",background:"transparent",border:`1px solid ${T.negative}40`,borderRadius:14,color:T.negative,fontFamily:"inherit",fontSize:14,fontWeight:600,cursor:"pointer"}}>Reset everything & start again</button>
     </div>;
   };
 
@@ -1263,22 +1295,18 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       <SettingsGroup title="Profile">
         <SettingsRow icon="👤" label="Identity" desc={`${profile.name||"Anonymous"}${profile.occupation?` · ${profile.occupation}`:""} · ${profile.currency}`} onClick={()=>setYouSection(youSection==="identity"?null:"identity")}/>
         {youSection==="identity"&&IdentitySection()}
-        <SettingsRow icon="💰" label="Income & Bills" desc={`${(profile.incomeStreams||[]).length} sources · ${(profile.fixedCommitments||[]).length} bills`} onClick={()=>setYouSection(youSection==="incomebills"?null:"incomebills")}/>
-        {youSection==="incomebills"&&IncomeBillsSection()}
-        <SettingsRow icon="🎯" label="Goals" desc={(profile.goals||[]).length>0?`${(profile.goals||[]).length} active`:"No goals set yet"} onClick={()=>setYouSection(youSection==="goals"?null:"goals")}/>
-        {youSection==="goals"&&GoalsSection()}
+        <SettingsRow icon="💰" label="Income & Bills" desc={`${(profile.incomeStreams||[]).length} sources · ${(profile.fixedCommitments||[]).length} bills`} onClick={()=>setSubScreen("income-bills")}/>
+        <SettingsRow icon="🎯" label="Goals" desc={(profile.goals||[]).length>0?`${(profile.goals||[]).length} active`:"No goals set yet"} onClick={()=>setSubScreen("goals")}/>
       </SettingsGroup>
 
       <SettingsGroup title="Appearance">
-        <SettingsRow icon="🎨" label="Theme" desc={`${LIGHT_PRESETS.concat(DARK_PRESETS).find(p=>p.accent===youAccent&&p.bg===youBg)?.name||"Custom"}`} onClick={()=>setYouSection(youSection==="theme"?null:"theme")}/>
-        {youSection==="theme"&&ThemeSection()}
+        <SettingsRow icon="🎨" label="Theme" desc={`${LIGHT_PRESETS.concat(DARK_PRESETS).find(p=>p.accent===youAccent&&p.bg===youBg)?.name||"Custom"}`} onClick={()=>setSubScreen("theme")}/>
       </SettingsGroup>
 
       <SettingsGroup title="Privacy & Data">
         <SettingsRow icon="🔒" label="Privacy policy" desc="What we do (and don't) with your data" onClick={()=>setShowPrivacy(true)}/>
         <SettingsRow icon="ℹ" label="About this app" desc="Version & landing page" onClick={()=>{window.location.href="/landing";}}/>
-        <SettingsRow icon="⚙" label="Advanced — backup, restore, reset" desc={`${txCount} transactions stored locally`} onClick={()=>setYouSection(youSection==="advanced"?null:"advanced")}/>
-        {youSection==="advanced"&&AdvancedSection()}
+        <SettingsRow icon="⚙" label="Advanced — backup, restore, reset" desc={`${txCount} transactions stored locally`} onClick={()=>setSubScreen("advanced")}/>
       </SettingsGroup>
 
       <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginTop:18,fontSize:10,color:T.textMuted,letterSpacing:0.5}}>
@@ -1367,23 +1395,103 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     </div>;
   };
 
+  const AddChooserScreen=()=>{
+    const submitQuick=()=>{
+      if(!qaDesc.trim()||!qaAmt||isNaN(+qaAmt)||+qaAmt<=0) return;
+      addManual({description:qaDesc.trim(),amount:qaAmt,category:qaCat||CATS[0]||"📦 Other",date:qaDate||todayStr()});
+      setQaDesc(""); setQaAmt(""); setQaCat(""); setQaDate(todayStr()); setAddMode("choose");
+    };
+    if(addMode==="choose") return <div style={{padding:"4px 0"}}>
+      <div style={{fontSize:13,color:T.textSecondary,marginBottom:18,padding:"0 4px"}}>How do you want to add transactions?</div>
+      <button onClick={()=>setSubScreen("upload")} style={{width:"100%",background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:"22px 18px",marginBottom:12,cursor:"pointer",fontFamily:"inherit",textAlign:"left",boxShadow:T.cardShadow,display:"flex",alignItems:"center",gap:14}}>
+        <div style={{width:48,height:48,borderRadius:14,background:T.accentSoft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>📄</div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:15,fontWeight:700,color:T.textPrimary,marginBottom:3}}>Upload statement</div>
+          <div style={{fontSize:12,color:T.textSecondary,lineHeight:1.5}}>PDF, CSV, or photo. Claude reads every transaction.</div>
+        </div>
+        <span style={{fontSize:18,color:T.textMuted,flexShrink:0}}>›</span>
+      </button>
+      <button onClick={()=>setAddMode("quick")} style={{width:"100%",background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:"22px 18px",cursor:"pointer",fontFamily:"inherit",textAlign:"left",boxShadow:T.cardShadow,display:"flex",alignItems:"center",gap:14}}>
+        <div style={{width:48,height:48,borderRadius:14,background:T.accentSoft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>✏️</div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:15,fontWeight:700,color:T.textPrimary,marginBottom:3}}>Quick add</div>
+          <div style={{fontSize:12,color:T.textSecondary,lineHeight:1.5}}>One transaction, no review needed.</div>
+        </div>
+        <span style={{fontSize:18,color:T.textMuted,flexShrink:0}}>›</span>
+      </button>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginTop:24,fontSize:10,color:T.textMuted,letterSpacing:0.5}}>
+        <PrivacyLock col={T.textMuted}/>Everything stays on your device
+      </div>
+    </div>;
+    // Quick add form
+    return <div>
+      <button onClick={()=>setAddMode("choose")} style={{background:"none",border:"none",color:T.textMuted,fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:"0 0 12px",marginBottom:4}}>‹ Back</button>
+      <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:18,boxShadow:T.cardShadow}}>
+        <MicroLabel style={{marginBottom:14}}>QUICK ADD TRANSACTION</MicroLabel>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <input type="text" placeholder="What was it? (e.g. Lunch, Grab)" value={qaDesc} onChange={e=>setQaDesc(e.target.value)} autoFocus style={{padding:"12px 14px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:12,color:T.textPrimary,fontFamily:"inherit",fontSize:14,outline:"none"}}/>
+          <input type="number" inputMode="decimal" placeholder="Amount" value={qaAmt} onChange={e=>setQaAmt(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submitQuick()} style={{padding:"12px 14px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:12,color:T.textPrimary,fontFamily:"'DM Mono'",fontSize:16,fontWeight:600,outline:"none"}}/>
+          <select value={qaCat||CATS[0]||"📦 Other"} onChange={e=>setQaCat(e.target.value)} style={{padding:"12px 14px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:12,color:T.textPrimary,fontFamily:"inherit",fontSize:14,outline:"none"}}>{[...CATS,...FIXED_CATS].map(c=><option key={c}>{c}</option>)}</select>
+          <input type="date" value={qaDate} onChange={e=>setQaDate(e.target.value)} style={{padding:"12px 14px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:12,color:T.textPrimary,fontFamily:"inherit",fontSize:14,outline:"none"}}/>
+          <Btn onClick={submitQuick} disabled={!qaDesc.trim()||!qaAmt||+qaAmt<=0} style={{marginTop:6}}>Add transaction</Btn>
+        </div>
+      </div>
+      <div style={{fontSize:11,color:T.textMuted,textAlign:"center",marginTop:14,lineHeight:1.5}}>Saves immediately. No review needed.<br/>You can edit or delete anytime in the Money tab.</div>
+    </div>;
+  };
+
   const MoneyContent=()=><div style={{padding:"8px 18px 24px",color:T.textPrimary}}>
-    {/* Header */}
-    <div style={{padding:"12px 0 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+    {/* Header — sticky */}
+    <div style={{padding:"12px 0 14px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:T.bg,zIndex:10,marginBottom:4}}>
       <div style={{fontSize:24,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>Money</div>
       <MonthPicker value={selectedMonth} onChange={setSelectedMonth} startMonth={profile.startMonth}/>
     </div>
 
-    {/* Donut */}
-    {byCat.length>0&&<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:18,marginBottom:12,display:"flex",alignItems:"center",gap:16,boxShadow:T.cardShadow}}>
-      {DonutChart()}
-      <div style={{flex:1,fontSize:11,minWidth:0}}>
-        {byCat.slice(0,5).map(([cat,amt],i)=><div key={i} style={{display:"flex",alignItems:"center",gap:7,marginBottom:6}}>
-          <div style={{width:8,height:8,borderRadius:4,background:COLS[cat]||T.accent,flexShrink:0}}/>
-          <span style={{color:T.textSecondary,flex:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{cat.split(" ").slice(1).join(" ")||cat}</span>
-          <span style={{fontFamily:"'DM Mono'",fontWeight:600,color:T.textPrimary,flexShrink:0}}>{fmt(Math.abs(amt))}</span>
-        </div>)}
+    {/* Subscriptions — promoted to top of Money for visibility */}
+    {detectedSubscriptions.length>0&&(()=>{
+      const total=detectedSubscriptions.reduce((s,x)=>s+x.amount,0);
+      const flagged=detectedSubscriptions.filter(s=>s.priceChange>0||s.monthsSeen>=4).length;
+      return <button onClick={()=>setSubScreen("subscriptions")} style={{width:"100%",background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:"16px 18px",marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:14}}>📱</span>
+            <span style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>Subscriptions</span>
+            {flagged>0&&<span style={{fontSize:10,fontWeight:700,color:T.warning,padding:"2px 7px",background:T.warning+"15",border:`1px solid ${T.warning}30`,borderRadius:8}}>{flagged} to check</span>}
+          </div>
+          <span style={{fontSize:14,color:T.textMuted}}>›</span>
+        </div>
+        <div style={{fontSize:24,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif",letterSpacing:-0.5}}>{fmt(total)}<span style={{fontSize:13,color:T.textMuted,fontWeight:500,marginLeft:6}}>/month</span></div>
+        <div style={{fontSize:11,color:T.textSecondary,marginTop:4}}>{detectedSubscriptions.length} active · ~{fmt(total*12)}/yr leaking</div>
+      </button>;
+    })()}
+
+    {/* Spending breakdown — replaces donut with cleaner horizontal bars */}
+    {byCat.length>0&&<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:"16px 18px",marginBottom:12,boxShadow:T.cardShadow}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:14}}>
+        <div style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>Spending breakdown</div>
+        <div style={{fontSize:13,fontFamily:"'DM Mono'",fontWeight:700,color:T.spent}}>{fmt(varTotal)}</div>
       </div>
+      {byCat.map(([cat,amt],i)=>{
+        const pct=varTotal!==0?(Math.abs(amt)/Math.abs(varTotal)*100):0;
+        const budget=profile.budgets?.[cat];
+        const overBudget=budget>0&&Math.abs(amt)>=budget*0.8;
+        return <div key={cat} style={{marginBottom:i<byCat.length-1?12:0}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
+            <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0,flex:1}}>
+              <span style={{fontSize:14,flexShrink:0}}>{cat.split(" ")[0]||"📦"}</span>
+              <span style={{fontSize:12,color:T.textPrimary,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{cat.split(" ").slice(1).join(" ")||cat}</span>
+              {overBudget&&<span style={{fontSize:9,color:T.warning,fontWeight:700,letterSpacing:0.3,marginLeft:4,flexShrink:0}}>OVER</span>}
+            </div>
+            <div style={{display:"flex",alignItems:"baseline",gap:6,flexShrink:0}}>
+              <span style={{fontSize:13,fontFamily:"'DM Mono'",fontWeight:600,color:T.textPrimary}}>{fmt(Math.abs(amt))}</span>
+              <span style={{fontSize:10,color:T.textMuted,fontFamily:"'DM Mono'"}}>{pct.toFixed(0)}%</span>
+            </div>
+          </div>
+          <div style={{height:5,background:T.borderSoft,borderRadius:5,overflow:"hidden"}}>
+            <div style={{height:"100%",width:`${pct}%`,background:COLS[cat]||T.accent,borderRadius:5,transition:"width .4s"}}/>
+          </div>
+        </div>;
+      })}
     </div>}
 
     {/* Income card */}
@@ -1415,16 +1523,6 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       </div>)}
     </div>}
 
-    {/* Subscriptions teaser */}
-    {detectedSubscriptions.length>0&&<button onClick={()=>setSubScreen("subscriptions")} style={{width:"100%",background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:"16px 18px",marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-        <div style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>📱 Subscriptions</div>
-        <span style={{fontSize:14,color:T.textMuted}}>›</span>
-      </div>
-      <div style={{fontSize:24,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif",letterSpacing:-0.5}}>{fmt(detectedSubscriptions.reduce((s,x)=>s+x.amount,0))}<span style={{fontSize:13,color:T.textMuted,fontWeight:500,marginLeft:6}}>/month</span></div>
-      <div style={{fontSize:11,color:T.textSecondary,marginTop:4}}>{detectedSubscriptions.length} active · ~{fmt(detectedSubscriptions.reduce((s,x)=>s+x.amount,0)*12)}/yr</div>
-    </button>}
-
     {/* Recent transactions */}
     {txs.length>0&&<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:"16px 0",marginBottom:12,boxShadow:T.cardShadow}}>
       <div style={{padding:"0 18px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -1448,39 +1546,88 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     </div>}
 
     {/* Empty state */}
-    {txs.length===0&&incomeRows.length===0&&<div onClick={()=>setSubScreen("upload")} style={{background:T.surface,border:`2px dashed ${T.border}`,borderRadius:18,padding:"32px 20px",textAlign:"center",cursor:"pointer"}}>
-      <div style={{fontSize:32,marginBottom:10}}>📄</div>
-      <div style={{fontSize:14,fontWeight:600,color:T.textPrimary,marginBottom:4}}>Nothing here yet</div>
-      <div style={{fontSize:12,color:T.textSecondary,lineHeight:1.5}}>Tap + below to upload your first bank statement,<br/>or set up income in <span onClick={(e)=>{e.stopPropagation();setTab("you");}} style={{color:T.accent,fontWeight:700}}>You</span></div>
+    {txs.length===0&&incomeRows.length===0&&<div onClick={()=>{setAddMode("choose");setSubScreen("add");}} style={{background:T.surface,border:`2px dashed ${T.border}`,borderRadius:18,padding:"32px 20px",textAlign:"center",cursor:"pointer"}}>
+      <div style={{fontSize:32,marginBottom:10}}>💰</div>
+      <div style={{fontSize:15,fontWeight:700,color:T.textPrimary,marginBottom:6,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>Nothing here yet</div>
+      <div style={{fontSize:12,color:T.textSecondary,lineHeight:1.6,maxWidth:260,margin:"0 auto"}}>Add transactions to see your spending breakdown, or set up income in <span onClick={(e)=>{e.stopPropagation();setTab("you");}} style={{color:T.accent,fontWeight:700,cursor:"pointer"}}>You</span> first.</div>
+      <div style={{marginTop:14,display:"inline-flex",alignItems:"center",gap:6,padding:"8px 16px",background:T.accent,color:"#fff",borderRadius:20,fontSize:12,fontWeight:600}}>Add transactions →</div>
     </div>}
   </div>;
   const HomeContent=()=><div style={{padding:"8px 18px 24px",color:T.textPrimary}}>
-    {/* Top — APRIL 2026, Hey Alex, avatar */}
+    {/* Top — APRIL 2026, Hey Alex, avatar + month picker */}
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 0 22px"}}>
       <div>
         <div style={{fontSize:11,color:T.textMuted,fontWeight:500,letterSpacing:0.3,marginBottom:2}}>{monthLabelUpper(selectedMonth)}</div>
         <div style={{fontSize:16,fontWeight:600,color:T.textPrimary}}>Hey, {firstName}</div>
       </div>
-      <div onClick={()=>setTab("you")} style={{cursor:"pointer",flexShrink:0}}>
-        {profile.avatar
-          ?<img src={profile.avatar} alt="" style={{width:38,height:38,borderRadius:19,objectFit:"cover"}}/>
-          :<div style={{width:38,height:38,borderRadius:19,background:T.accentSoft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:T.accent}}>{firstName[0]?.toUpperCase()||"?"}</div>}
+      <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+        <MonthPicker value={selectedMonth} onChange={setSelectedMonth} startMonth={profile.startMonth}/>
+        <div onClick={()=>setTab("you")} style={{cursor:"pointer",flexShrink:0}}>
+          {profile.avatar
+            ?<img src={profile.avatar} alt="" style={{width:38,height:38,borderRadius:19,objectFit:"cover"}}/>
+            :<div style={{width:38,height:38,borderRadius:19,background:T.accentSoft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:T.accent}}>{firstName[0]?.toUpperCase()||"?"}</div>}
+        </div>
       </div>
     </div>
 
     {/* HERO */}
     <div style={{marginBottom:26}}>
-      {incTotal>0?<>
-        <div style={{fontSize:13,color:T.textSecondary,marginBottom:6,fontWeight:500}}>{saved>=0?"You've kept":"You're over by"}</div>
-        <div style={{fontSize:56,fontWeight:700,color:T.textPrimary,letterSpacing:-2,lineHeight:1,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>
-          {(()=>{ const abs=Math.abs(saved); const cents=(abs-Math.floor(abs)).toFixed(2).slice(1); return <><CountUp value={Math.floor(abs)} duration={900} format={n=>sym+Math.floor(n).toLocaleString("en-SG")}/><span style={{fontSize:28,color:T.textMuted,fontWeight:500}}>{cents}</span></>; })()}
-        </div>
-        <div style={{fontSize:14,color:T.textSecondary,marginTop:8,lineHeight:1.5}}>
-          {saved>=0
-            ?<>That's <span style={{color:T.accent,fontWeight:700}}>{savingsRate.toFixed(0)}% saved</span> this month{prevSaved!==0&&savedDelta!==0?` — ${savedDelta>=0?"better":"less"} than last month`:""}{prevSaved>0&&savedDelta>0?" 🎉":""}</>
-            :<>Spending exceeded income by <span style={{color:T.negative,fontWeight:700}}>{fmt(Math.abs(saved))}</span></>}
-        </div>
-      </>:<>
+      {incTotal>0?(()=>{
+        // Determine what to show based on month state
+        const isPastMonth=selectedMonth<currentMonth();
+        const isFutureMonth=selectedMonth>currentMonth();
+        const isEarlyInMonth=isCurMonth&&dayOfMonth<=14;
+        const isLateInMonth=isCurMonth&&dayOfMonth>14;
+        const hasEnoughDataForProjection=isCurMonth&&dayOfMonth>5&&txs.length>=3;
+
+        // Future month
+        if(isFutureMonth){
+          return <>
+            <div style={{fontSize:13,color:T.textSecondary,marginBottom:6,fontWeight:500}}>Future month</div>
+            <div style={{fontSize:36,fontWeight:700,color:T.textPrimary,letterSpacing:-1,lineHeight:1.1,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>{monthLabel(selectedMonth)}</div>
+            <div style={{fontSize:14,color:T.textSecondary,marginTop:8,lineHeight:1.5}}>Hasn't happened yet. Switch to <span onClick={()=>setSelectedMonth(currentMonth())} style={{color:T.accent,fontWeight:700,cursor:"pointer"}}>this month</span> to see what's going on.</div>
+          </>;
+        }
+
+        // Early in current month + we can project — show projection as primary, actual as secondary
+        if(isEarlyInMonth&&hasEnoughDataForProjection){
+          const projGood=projectedSaved>=0;
+          return <>
+            <div style={{fontSize:13,color:T.textSecondary,marginBottom:6,fontWeight:500,display:"flex",alignItems:"center",gap:6}}>
+              <span style={{display:"inline-block",width:6,height:6,borderRadius:3,background:T.accent,boxShadow:`0 0 0 4px ${T.accent}25`}}/>
+              On track to {projGood?"keep":"go over by"}
+            </div>
+            <div style={{fontSize:56,fontWeight:700,color:T.textPrimary,letterSpacing:-2,lineHeight:1,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>
+              {(()=>{ const abs=Math.abs(projectedSaved); const cents=(abs-Math.floor(abs)).toFixed(2).slice(1); return <><CountUp value={Math.floor(abs)} duration={900} format={n=>sym+Math.floor(n).toLocaleString("en-SG")}/><span style={{fontSize:28,color:T.textMuted,fontWeight:500}}>{cents}</span></>; })()}
+            </div>
+            <div style={{fontSize:13,color:T.textMuted,marginTop:6,lineHeight:1.5}}>by end of {monthLabel(selectedMonth).split(" ")[0]} · <span style={{color:T.textSecondary,fontWeight:600}}>{fmt(Math.abs(saved))} {saved>=0?"kept":"over"} so far</span> · day {dayOfMonth} of {daysInMonth}</div>
+          </>;
+        }
+
+        // Early in current month but not enough data — show partial actual
+        if(isEarlyInMonth&&!hasEnoughDataForProjection){
+          return <>
+            <div style={{fontSize:13,color:T.textSecondary,marginBottom:6,fontWeight:500}}>So far this month</div>
+            <div style={{fontSize:56,fontWeight:700,color:T.textPrimary,letterSpacing:-2,lineHeight:1,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>
+              {(()=>{ const abs=Math.abs(saved); const cents=(abs-Math.floor(abs)).toFixed(2).slice(1); return <><CountUp value={Math.floor(abs)} duration={900} format={n=>sym+Math.floor(n).toLocaleString("en-SG")}/><span style={{fontSize:28,color:T.textMuted,fontWeight:500}}>{cents}</span></>; })()}
+            </div>
+            <div style={{fontSize:13,color:T.textMuted,marginTop:6,lineHeight:1.5}}>day {dayOfMonth} · add a few transactions to see your full pace</div>
+          </>;
+        }
+
+        // Late in current month or past month — show actual with full context
+        return <>
+          <div style={{fontSize:13,color:T.textSecondary,marginBottom:6,fontWeight:500}}>{isPastMonth?"You kept":(saved>=0?"You've kept":"You're over by")}</div>
+          <div style={{fontSize:56,fontWeight:700,color:T.textPrimary,letterSpacing:-2,lineHeight:1,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>
+            {(()=>{ const abs=Math.abs(saved); const cents=(abs-Math.floor(abs)).toFixed(2).slice(1); return <><CountUp value={Math.floor(abs)} duration={900} format={n=>sym+Math.floor(n).toLocaleString("en-SG")}/><span style={{fontSize:28,color:T.textMuted,fontWeight:500}}>{cents}</span></>; })()}
+          </div>
+          <div style={{fontSize:14,color:T.textSecondary,marginTop:8,lineHeight:1.5}}>
+            {saved>=0
+              ?<>That's <span style={{color:T.accent,fontWeight:700}}>{savingsRate.toFixed(0)}% saved</span>{isPastMonth?" of income":" this month"}{prevSaved!==0&&savedDelta!==0?` — ${savedDelta>=0?"better":"less"} than last month`:""}{prevSaved>0&&savedDelta>0?" 🎉":""}</>
+              :<>Spending exceeded income by <span style={{color:T.negative,fontWeight:700}}>{fmt(Math.abs(saved))}</span></>}
+          </div>
+        </>;
+      })():<>
         <div style={{fontSize:13,color:T.textSecondary,marginBottom:6,fontWeight:500}}>Welcome to {monthLabel(selectedMonth)}</div>
         <div style={{fontSize:32,fontWeight:700,color:T.textPrimary,letterSpacing:-1,lineHeight:1.1,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>Let's get you set up</div>
         <div style={{fontSize:14,color:T.textSecondary,marginTop:8,lineHeight:1.5}}>Add your income sources in <span onClick={()=>setTab("you")} style={{color:T.accent,fontWeight:700,cursor:"pointer"}}>You</span> to see your full picture.</div>
@@ -1511,6 +1658,76 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       </div>
     </div>}
 
+    {/* 6-MONTH TREND — line chart */}
+    {monthlySavings.filter(m=>m.hasData).length>=2&&(()=>{
+      const points=monthlySavings;
+      const W=320, H=110, padX=14, padY=18;
+      const innerW=W-padX*2, innerH=H-padY*2;
+      const values=points.flatMap(p=>[p.saved,p.projected].filter(v=>v!=null));
+      const max=Math.max(...values,0);
+      const min=Math.min(...values,0);
+      const range=Math.max(1,max-min);
+      const xFor=i=>padX+(points.length<=1?innerW/2:(i/(points.length-1))*innerW);
+      const yFor=v=>padY+innerH-((v-min)/range)*innerH;
+      const zeroY=yFor(0);
+      // Build solid path (only points with data, ending at last full month or current actual)
+      const solidPts=points.map((p,i)=>p.hasData?{x:xFor(i),y:yFor(p.saved),i,p}:null).filter(Boolean);
+      const solidPath=solidPts.map((pt,i)=>`${i===0?"M":"L"}${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`).join(" ");
+      // Build dashed projection segment if current month has projected
+      const curIdx=points.findIndex(p=>p.isCurrent);
+      const cur=points[curIdx];
+      let projPath=null, projEndPt=null;
+      if(cur&&cur.projected!=null&&cur.hasData){
+        // Dashed line from current actual to projected
+        projEndPt={x:xFor(curIdx),y:yFor(cur.projected)};
+        const startPt={x:xFor(curIdx),y:yFor(cur.saved)};
+        projPath=`M${startPt.x.toFixed(1)} ${startPt.y.toFixed(1)} L${projEndPt.x.toFixed(1)} ${projEndPt.y.toFixed(1)}`;
+      }
+      const sym=CURRENCY_SYMBOLS[profile?.currency||"SGD"];
+      const fmtCompact=v=>{ const a=Math.abs(v); if(a>=1000) return `${v<0?"-":""}${sym}${(a/1000).toFixed(a>=10000?0:1)}k`; return `${v<0?"-":""}${sym}${a.toFixed(0)}`; };
+      const lastSaved=cur?.hasData?cur.saved:(solidPts.length?solidPts[solidPts.length-1].p.saved:0);
+      const prevPt=solidPts.length>=2?solidPts[solidPts.length-2]:null;
+      const trendUp=prevPt?lastSaved>=prevPt.p.saved:true;
+
+      return <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:"14px 16px 10px",marginBottom:12,boxShadow:T.cardShadow}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10}}>
+          <div>
+            <MicroLabel style={{marginBottom:2}}>6-MONTH TREND</MicroLabel>
+            <div style={{fontSize:11,color:T.textMuted}}>{trendUp?"↑ trending up":"↓ trending down"}</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:11,color:T.textMuted}}>Avg saved</div>
+            <div style={{fontSize:13,fontFamily:"'DM Mono'",fontWeight:700,color:T.textPrimary}}>{fmtCompact(solidPts.reduce((s,p)=>s+p.p.saved,0)/Math.max(1,solidPts.length))}</div>
+          </div>
+        </div>
+        <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{display:"block",overflow:"visible"}}>
+          {/* Zero baseline */}
+          {min<0&&zeroY>=padY&&zeroY<=H-padY&&<line x1={padX} y1={zeroY} x2={W-padX} y2={zeroY} stroke={T.border} strokeWidth="1" strokeDasharray="2,3"/>}
+          {/* Solid path */}
+          {solidPath&&<path d={solidPath} fill="none" stroke={T.accent} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>}
+          {/* Projection */}
+          {projPath&&<path d={projPath} fill="none" stroke={T.accent} strokeWidth="2" strokeDasharray="4,4" strokeLinecap="round" opacity="0.55"/>}
+          {/* Points */}
+          {solidPts.map((pt,i)=><g key={i} style={{cursor:"pointer"}} onClick={()=>setSelectedMonth(pt.p.month)}>
+            <circle cx={pt.x} cy={pt.y} r="11" fill="transparent"/>
+            <circle cx={pt.x} cy={pt.y} r={pt.p.month===selectedMonth?5:3.5} fill={pt.p.month===selectedMonth?T.accent:T.surface} stroke={T.accent} strokeWidth="2"/>
+          </g>)}
+          {/* Projected dot */}
+          {projEndPt&&<circle cx={projEndPt.x} cy={projEndPt.y} r="3" fill={T.surface} stroke={T.accent} strokeWidth="2" opacity="0.55"/>}
+          {/* X-axis month labels */}
+          {points.map((p,i)=>{
+            const isSel=p.month===selectedMonth;
+            const lbl=monthLabelShort(p.month).split(" ")[0]; // "Apr"
+            return <text key={`l${i}`} x={xFor(i)} y={H-3} textAnchor="middle" fontSize="9" fill={isSel?T.accent:T.textMuted} fontFamily="DM Mono" fontWeight={isSel?"700":"500"}>{lbl}</text>;
+          })}
+        </svg>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8,fontSize:10,color:T.textMuted}}>
+          <span>Tap a point to switch month</span>
+          {projEndPt&&<span><span style={{display:"inline-block",width:10,height:2,background:T.accent,opacity:0.55,verticalAlign:"middle",marginRight:4}}/>projected</span>}
+        </div>
+      </div>;
+    })()}
+
     {/* Forecast insight */}
     {isCurMonth&&incTotal>0&&dayOfMonth>5&&<div onClick={()=>setSubScreen("forecast")} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:"14px 16px",marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer"}}>
       <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
@@ -1523,35 +1740,97 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       </div>
     </div>}
 
-    {/* Review nudge */}
-    {pendingTxs.length>0&&<button onClick={()=>setSubScreen("review")} style={{width:"100%",background:T.warning+"10",border:`1px solid ${T.warning}30`,borderRadius:18,padding:"14px 16px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
-      <div style={{display:"flex",gap:10,alignItems:"center"}}>
-        <div style={{width:32,height:32,borderRadius:16,background:T.warning+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>📋</div>
-        <div>
-          <div style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>{pendingTxs.length} new transaction{pendingTxs.length!==1?"s":""} to check</div>
-          <div style={{fontSize:11,color:T.textSecondary,marginTop:1}}>From your latest import</div>
+    {/* Subscriptions insight — promoted to Home */}
+    {detectedSubscriptions.length>0&&(()=>{
+      const subTotal=detectedSubscriptions.reduce((s,x)=>s+x.amount,0);
+      const yearly=subTotal*12;
+      const flagged=detectedSubscriptions.filter(s=>s.priceChange>0||s.monthsSeen>=4);
+      const hasFlag=flagged.length>0;
+      return <button onClick={()=>setSubScreen("subscriptions")} style={{width:"100%",background:T.surface,border:`1px solid ${hasFlag?T.warning+"40":T.border}`,borderRadius:18,padding:"14px 16px",marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer",fontFamily:"inherit",textAlign:"left",display:"flex",alignItems:"center",gap:12}}>
+        <div style={{width:36,height:36,borderRadius:18,background:hasFlag?T.warning+"20":T.accentSoft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{hasFlag?"⚠":"📱"}</div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:13,fontWeight:600,color:T.textPrimary,marginBottom:2}}>{hasFlag?`${flagged.length} subscription${flagged.length!==1?"s":""} worth checking`:`${detectedSubscriptions.length} active subscription${detectedSubscriptions.length!==1?"s":""}`}</div>
+          <div style={{fontSize:11,color:T.textSecondary}}>{fmt(subTotal)}/mo · {fmt(yearly)}/yr</div>
         </div>
-      </div>
-      <span style={{fontSize:16,color:T.warning}}>→</span>
-    </button>}
+        <span style={{fontSize:14,color:T.textMuted,flexShrink:0}}>›</span>
+      </button>;
+    })()}
 
-    {/* Variable income waiting */}
-    {pendingVarStreams(streams,ov,selectedMonth).length>0&&<button onClick={()=>setTab("money")} style={{width:"100%",background:T.info+"10",border:`1px solid ${T.info}30`,borderRadius:18,padding:"14px 16px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
-      <div style={{display:"flex",gap:10,alignItems:"center"}}>
-        <div style={{width:32,height:32,borderRadius:16,background:T.info+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>💰</div>
-        <div>
-          <div style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>{pendingVarStreams(streams,ov,selectedMonth).length} variable income to enter</div>
-          <div style={{fontSize:11,color:T.textSecondary,marginTop:1}}>Tap to enter in Money</div>
-        </div>
-      </div>
-      <span style={{fontSize:16,color:T.info}}>→</span>
-    </button>}
+    {/* Things to do — consolidated nudges */}
+    {(()=>{
+      const todos=[];
+      if(pendingTxs.length>0) todos.push({
+        id:"review", icon:"📋", color:T.warning,
+        label:`${pendingTxs.length} new transaction${pendingTxs.length!==1?"s":""} to check`,
+        sub:"From your latest import",
+        onClick:()=>setSubScreen("review")
+      });
+      const pendVar=pendingVarStreams(streams,ov,selectedMonth);
+      if(pendVar.length>0) todos.push({
+        id:"varincome", icon:"💰", color:T.info,
+        label:`${pendVar.length} variable income${pendVar.length>1?"s":""} to enter`,
+        sub:`${pendVar.map(p=>p.stream.name).slice(0,2).join(", ")}${pendVar.length>2?` +${pendVar.length-2}`:""}`,
+        onClick:()=>setTab("money")
+      });
+      // Budget alerts: any category over 80% of its budget this month
+      if(profile.budgets){
+        const overBudget=byCat.filter(([cat,amt])=>{ const b=profile.budgets[cat]; return b&&b>0&&Math.abs(amt)>=b*0.8; });
+        if(overBudget.length>0) todos.push({
+          id:"budget", icon:"⚠", color:T.negative,
+          label:`${overBudget.length} budget${overBudget.length!==1?"s":""} near limit`,
+          sub:overBudget.slice(0,2).map(([c])=>c.split(" ")[1]||c).join(", "),
+          onClick:()=>setTab("money")
+        });
+      }
+      if(todos.length===0) return null;
 
-    {/* Top spending */}
-    {byCat.length>0&&<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:16,marginBottom:12,boxShadow:T.cardShadow}}>
+      // Single-todo: render expanded by default (no point collapsing one item)
+      if(todos.length===1){
+        const t=todos[0];
+        return <button onClick={t.onClick} style={{width:"100%",background:t.color+"10",border:`1px solid ${t.color}30`,borderRadius:18,padding:"14px 16px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+          <div style={{display:"flex",gap:10,alignItems:"center"}}>
+            <div style={{width:32,height:32,borderRadius:16,background:t.color+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{t.icon}</div>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>{t.label}</div>
+              <div style={{fontSize:11,color:T.textSecondary,marginTop:1}}>{t.sub}</div>
+            </div>
+          </div>
+          <span style={{fontSize:16,color:t.color}}>→</span>
+        </button>;
+      }
+
+      // Multi-todo: collapsible header + expandable list
+      return <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,marginBottom:12,boxShadow:T.cardShadow,overflow:"hidden"}}>
+        <button onClick={()=>setTodosExpanded(e=>!e)} style={{width:"100%",padding:"14px 16px",background:"transparent",border:"none",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+          <div style={{display:"flex",gap:10,alignItems:"center"}}>
+            <div style={{width:32,height:32,borderRadius:16,background:T.accentSoft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,color:T.accent,fontWeight:800}}>{todos.length}</div>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>{todos.length} things to do</div>
+              <div style={{fontSize:11,color:T.textSecondary,marginTop:1}}>{todos.map(t=>t.icon).join(" · ")}</div>
+            </div>
+          </div>
+          <span style={{fontSize:14,color:T.textMuted,transition:"transform .15s",transform:todosExpanded?"rotate(180deg)":"rotate(0)"}}>▾</span>
+        </button>
+        {todosExpanded&&<div style={{borderTop:`1px solid ${T.borderSoft}`}}>
+          {todos.map((t,i)=><button key={t.id} onClick={t.onClick} style={{width:"100%",padding:"12px 16px",background:"transparent",border:"none",borderTop:i>0?`1px solid ${T.borderSoft}`:"none",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+            <div style={{display:"flex",gap:10,alignItems:"center"}}>
+              <div style={{width:28,height:28,borderRadius:14,background:t.color+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>{t.icon}</div>
+              <div>
+                <div style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>{t.label}</div>
+                <div style={{fontSize:11,color:T.textSecondary,marginTop:1}}>{t.sub}</div>
+              </div>
+            </div>
+            <span style={{fontSize:14,color:t.color}}>→</span>
+          </button>)}
+        </div>}
+      </div>;
+    })()}
+
+    {/* Top spending — tappable to Money tab */}
+    {byCat.length>0&&<button onClick={()=>setTab("money")} style={{width:"100%",background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:16,marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer",fontFamily:"inherit",textAlign:"left",display:"block"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
         <div style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>Top spending</div>
-        <span style={{fontSize:11,color:T.textMuted}}>This month</span>
+        <span style={{fontSize:11,color:T.accent,fontWeight:600}}>{byCat.length>4?`+${byCat.length-4} more →`:"See all →"}</span>
       </div>
       {byCat.slice(0,4).map(([cat,amt])=>{
         const pct=varTotal!==0?(Math.abs(amt)/Math.abs(varTotal)*100):0;
@@ -1565,22 +1844,18 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           </div>
         </div>;
       })}
-    </div>}
+    </button>}
 
     {/* Empty state */}
-    {byCat.length===0&&<div onClick={()=>setSubScreen("upload")} style={{background:T.surface,border:`2px dashed ${T.border}`,borderRadius:18,padding:"28px 20px",textAlign:"center",cursor:"pointer",marginBottom:12}}>
-      <div style={{fontSize:32,marginBottom:10}}>📄</div>
-      <div style={{fontSize:14,fontWeight:600,color:T.textPrimary,marginBottom:4}}>No transactions yet</div>
-      <div style={{fontSize:12,color:T.textSecondary,lineHeight:1.5}}>Tap the + button below to upload<br/>your first bank statement</div>
+    {byCat.length===0&&<div onClick={()=>{setAddMode("choose");setSubScreen("add");}} style={{background:T.surface,border:`2px dashed ${T.border}`,borderRadius:18,padding:"32px 20px",textAlign:"center",cursor:"pointer",marginBottom:12}}>
+      <div style={{fontSize:32,marginBottom:10}}>👋</div>
+      <div style={{fontSize:15,fontWeight:700,color:T.textPrimary,marginBottom:6,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>Add your first transactions</div>
+      <div style={{fontSize:12,color:T.textSecondary,lineHeight:1.6,maxWidth:260,margin:"0 auto"}}>Upload a bank statement to extract everything in one go, or quick-add a transaction by hand.</div>
+      <div style={{marginTop:14,display:"inline-flex",alignItems:"center",gap:6,padding:"8px 16px",background:T.accent,color:"#fff",borderRadius:20,fontSize:12,fontWeight:600}}>Add transactions →</div>
     </div>}
 
-    {/* Month picker */}
-    <div style={{marginTop:18,display:"flex",justifyContent:"center"}}>
-      <MonthPicker value={selectedMonth} onChange={setSelectedMonth} startMonth={profile.startMonth}/>
-    </div>
-
     {/* Privacy badge */}
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginTop:18,fontSize:10,color:T.textMuted,letterSpacing:0.5}}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginTop:24,fontSize:10,color:T.textMuted,letterSpacing:0.5}}>
       <PrivacyLock col={T.textMuted}/>
       100% on-device · nothing leaves your phone
     </div>
@@ -1638,21 +1913,6 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
       <input ref={fileRef} type="file" accept=".pdf,.csv,application/pdf,text/csv" style={{display:"none"}} onChange={handleFile}/>
       <input ref={photoRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleFile}/>
-
-      {/* Manual add — secondary */}
-      {!uploading&&<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:"16px 18px",boxShadow:T.cardShadow}}>
-        <button onClick={()=>setManualOpen(o=>!o)} style={{width:"100%",background:"none",border:"none",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",fontFamily:"inherit",padding:0,color:T.textPrimary}}>
-          <div style={{fontSize:13,fontWeight:600}}>Or add a transaction manually</div>
-          <span style={{fontSize:14,color:T.textMuted}}>{manualOpen?"▲":"▼"}</span>
-        </button>
-        {manualOpen&&<div style={{marginTop:14,display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <input type="text" placeholder="Description" value={manualDesc} onChange={e=>setManualDesc(e.target.value)} style={{gridColumn:"1/-1",padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"inherit",fontSize:13,outline:"none"}}/>
-          <input type="number" placeholder="Amount" value={manualAmt} onChange={e=>setManualAmt(e.target.value)} style={{padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"'DM Mono'",fontSize:13,outline:"none"}}/>
-          <input type="date" value={manualDate} onChange={e=>setManualDate(e.target.value)} style={{padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"inherit",fontSize:13,outline:"none"}}/>
-          <select value={manualCat||CATS[0]||"📦 Other"} onChange={e=>setManualCat(e.target.value)} style={{gridColumn:"1/-1",padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"inherit",fontSize:13,outline:"none"}}>{[...CATS,...FIXED_CATS].map(c=><option key={c}>{c}</option>)}</select>
-          <Btn onClick={submitManual} style={{gridColumn:"1/-1"}} size="sm">Add transaction</Btn>
-        </div>}
-      </div>}
 
       <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginTop:18,fontSize:10,color:T.textMuted,letterSpacing:0.5}}>
         <PrivacyLock col={T.textMuted}/>Your statement never leaves this device
@@ -1714,15 +1974,20 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       {subScreen&&<div style={{position:"fixed",inset:0,background:T.bg,zIndex:200,overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
         <div style={{maxWidth:580,margin:"0 auto",padding:"8px 18px 24px"}}>
           <div style={{display:"flex",alignItems:"center",gap:8,padding:"12px 0 18px"}}>
-            <button onClick={()=>setSubScreen(null)} style={{background:"none",border:"none",fontSize:24,color:T.textSecondary,cursor:"pointer",padding:"4px 8px",fontFamily:"inherit"}}>‹</button>
+            <button onClick={()=>{setSubScreen(null);setAddMode("choose");setIbDraft(null);setGoalsDraft(null);}} style={{background:"none",border:"none",fontSize:24,color:T.textSecondary,cursor:"pointer",padding:"4px 8px",fontFamily:"inherit"}}>‹</button>
             <div style={{fontSize:18,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>
-              {subScreen==="upload"?"Add transactions":subScreen==="review"?"Quick review":subScreen==="forecast"?"Forecast":subScreen==="subscriptions"?"Subscriptions":""}
+              {subScreen==="add"?"Add":subScreen==="upload"?"Upload statement":subScreen==="review"?"Quick review":subScreen==="forecast"?"Forecast":subScreen==="subscriptions"?"Subscriptions":subScreen==="income-bills"?"Income & Bills":subScreen==="goals"?"Goals":subScreen==="theme"?"Theme":subScreen==="advanced"?"Advanced":""}
             </div>
           </div>
+          {subScreen==="add"&&AddChooserScreen()}
           {subScreen==="upload"&&UploadScreen()}
           {subScreen==="subscriptions"&&SubscriptionsScreen()}
           {subScreen==="forecast"&&ForecastScreen()}
           {subScreen==="review"&&ReviewScreen()}
+          {subScreen==="income-bills"&&IncomeBillsSection()}
+          {subScreen==="goals"&&GoalsSection()}
+          {subScreen==="theme"&&ThemeSection()}
+          {subScreen==="advanced"&&AdvancedSection()}
         </div>
       </div>}
 
@@ -1755,7 +2020,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           </button>;
         })}
         {/* Floating + button — anchored to right side, raised */}
-        <button onClick={()=>setSubScreen("upload")} style={{position:"absolute",right:18,top:-26,width:56,height:56,borderRadius:28,background:T.accent,border:`4px solid ${T.bg}`,color:"#fff",fontSize:28,fontWeight:300,cursor:"pointer",boxShadow:`0 6px 20px ${T.accent}55`,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1,paddingBottom:4,fontFamily:"inherit"}}>+</button>
+        <button onClick={()=>{setAddMode("choose");setSubScreen("add");}} style={{position:"absolute",right:18,top:-26,width:56,height:56,borderRadius:28,background:T.accent,border:`4px solid ${T.bg}`,color:"#fff",fontSize:28,fontWeight:300,cursor:"pointer",boxShadow:`0 6px 20px ${T.accent}55`,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1,paddingBottom:4,fontFamily:"inherit"}}>+</button>
       </div>
     </div>
   </ThemeCtx.Provider>;
