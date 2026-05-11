@@ -2013,10 +2013,21 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           {zeroDays>0&&<>{zeroDays} {zeroDays===1?"day":"days"} with no spending. </>}
           Total {fmt(varTotal)} over {lastDataDay} {lastDataDay===1?"day":"days"}.
         </div>
-      </div>:<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:"22px 18px",marginBottom:14,textAlign:"center",boxShadow:T.cardShadow}}>
-        <div style={{fontSize:24,marginBottom:8}}>📊</div>
-        <div style={{fontSize:13,color:T.textSecondary}}>No spending transactions for {monthLabel(selectedMonth)} yet.</div>
-      </div>}
+      </div>:(()=>{
+        // Find past months that DO have spending data — offer them as quick links
+        const monthsWithSpend=Object.entries(monthlyData).filter(([m,d])=>(d.txs||[]).some(t=>t.amount>0)&&m!==selectedMonth).map(([m])=>m).sort().reverse().slice(0,4);
+        return <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:"22px 18px",marginBottom:14,textAlign:"center",boxShadow:T.cardShadow}}>
+          <div style={{fontSize:24,marginBottom:8}}>📊</div>
+          <div style={{fontSize:14,fontWeight:600,color:T.textPrimary,marginBottom:4,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>No daily spending chart yet</div>
+          <div style={{fontSize:12,color:T.textSecondary,lineHeight:1.6,marginBottom:monthsWithSpend.length>0?14:0,maxWidth:280,margin:"0 auto"}}>No spending transactions in {monthLabel(selectedMonth)}{isCurMonthLocal?" so far. Once you upload a statement or add a few transactions, the daily spiky line appears here.":". Try a different month — the chart shows day-by-day spending for any month with data."}</div>
+          {monthsWithSpend.length>0&&<div style={{marginTop:14}}>
+            <div style={{fontSize:10,color:T.textMuted,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4,marginBottom:8}}>OR TRY THESE MONTHS</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"center"}}>
+              {monthsWithSpend.map(m=><button key={m} onClick={()=>setSelectedMonth(m)} style={{padding:"6px 12px",borderRadius:14,border:`1px solid ${T.accent}`,background:T.accentSoft,color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{monthLabelShort(m)}</button>)}
+            </div>
+          </div>}
+        </div>;
+      })()}
 
       {/* Category projection (current month only) */}
       {isCurMonthLocal&&dayOfMonth>5&&byCat.length>0&&(()=>{
@@ -2418,11 +2429,6 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
           {/* Breakdown pill */}
           <div style={{display:"flex",gap:8,marginTop:18,padding:"10px 12px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,boxShadow:T.cardShadow}}>
-            <div style={{flex:1,textAlign:"center",padding:"4px 6px"}}>
-              <div style={{fontSize:9,color:T.textMuted,fontWeight:700,letterSpacing:0.4,fontFamily:"'DM Mono'"}}>EARNED</div>
-              <div style={{fontSize:13,fontWeight:700,color:T.textPrimary,fontFamily:"'DM Mono'",marginTop:2}}>{fmt(incTotal)}</div>
-            </div>
-            <div style={{width:1,background:T.borderSoft,margin:"4px 0"}}/>
             <div style={{flex:1,textAlign:"center",padding:"4px 6px"}}>
               <div style={{fontSize:9,color:T.textMuted,fontWeight:700,letterSpacing:0.4,fontFamily:"'DM Mono'"}}>BILLS</div>
               <div style={{fontSize:13,fontWeight:700,color:T.bills,fontFamily:"'DM Mono'",marginTop:2}}>{fmt(fixedTotal)}</div>
@@ -3019,3 +3025,4 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     </div>
   </ThemeCtx.Provider>;
 }
+
