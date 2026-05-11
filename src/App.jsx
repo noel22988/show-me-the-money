@@ -49,7 +49,9 @@ const DEFAULT_PROFILE = {
   onboarded:false,
   accentColor: CALM_DEFAULT_ACCENT,
   bgColor:     CALM_DEFAULT_BG,
-  startMonth:currentMonth()
+  startMonth:currentMonth(),
+  insightPrefs:["savings_vs_avg"],
+  goal:null
 };
 
 // ── Storage ───────────────────────────────────────────────────────────────────
@@ -88,6 +90,12 @@ const useTheme = () => useContext(ThemeCtx);
 
 // ── Category & Income helpers ─────────────────────────────────────────────────
 function getAllCats(cc=[]){ return [...BUILTIN_CATEGORIES,...(cc||[]).map(c=>`${c.emoji} ${c.name}`)]; }
+// Split-aware amount: returns what counts toward THIS user's totals after splits
+function effectiveAmount(t){
+  if(!t?.split||!t.split.with||typeof t.split.share!=="number") return t.amount;
+  const share=Math.max(0,Math.min(1,t.split.share));
+  return t.amount*share;
+}
 function getAllCatCols(cc=[]){ const x={}; (cc||[]).forEach(c=>{x[`${c.emoji} ${c.name}`]=c.color||"#868E96";}); return {...CAT_COLORS,...x}; }
 function isFixedCat(cat){ return FIXED_CATS.includes(cat); }
 function getMonthStreams(streams,ov,month){
@@ -111,21 +119,6 @@ function pendingVarStreams(streams,ov,month){
   return getMonthStreams(streams,ov,month).filter(({stream,amount})=>(stream.type==="variable"||stream.type==="oneoff")&&amount===null);
 }
 
-// ── Habit helpers ─────────────────────────────────────────────────────────────
-const HABIT_THRESHOLD = 1;
-function habitFlags(eh,ch){
-  const mf={},cf={};
-  for(const [k,v] of Object.entries(eh||{})){ const count=typeof v==="object"?v.count:v; if(count>=HABIT_THRESHOLD) mf[k]=v; }
-  for(const [k,v] of Object.entries(ch||{})) if(v>=HABIT_THRESHOLD) cf[k]=v;
-  return {mf,cf};
-}
-function habitReason(tx,mf,cf){
-  const k=tx.description?.toLowerCase().trim();
-  if(mf[k]) return `excluded before`;
-  if(cf[tx.category]) return `category excluded before`;
-  return null;
-}
-
 // ── CSV chunker, export, backup ───────────────────────────────────────────────
 function splitCSV(text,size=15000){
   const lines=text.split("\n"); const hdr=lines[0]; const rows=lines.slice(1).filter(l=>l.trim());
@@ -141,12 +134,12 @@ function exportCSV(monthlyData){
   const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=`spending-${todayStr()}.csv`; a.click(); URL.revokeObjectURL(url);
 }
 function countAllTx(md){ return Object.values(md).reduce((s,m)=>s+(m.txs||[]).length,0); }
-function mkSnap(profile,md,eh,ch,ins,arc){ return {version:APP_VERSION,createdAt:new Date().toISOString(),profile,monthlyData:md,excludeHistory:eh,catExcludeHistory:ch,insights:ins,archive:arc}; }
-function autoBackup(profile,md,eh,ch,ins,arc){
-  try{ const snap=mkSnap(profile,md,eh,ch,ins,arc); const ex=lsLoad("autoBackups")||[]; const today=todayStr(); lsSave("autoBackups",[snap,...ex.filter(b=>!b.createdAt?.startsWith(today))].slice(0,MAX_AUTO_BACKUPS)); }catch(e){ console.error(e); }
+function mkSnap(profile,md,ins,arc){ return {version:APP_VERSION,createdAt:new Date().toISOString(),profile,monthlyData:md,insights:ins,archive:arc}; }
+function autoBackup(profile,md,ins,arc){
+  try{ const snap=mkSnap(profile,md,ins,arc); const ex=lsLoad("autoBackups")||[]; const today=todayStr(); lsSave("autoBackups",[snap,...ex.filter(b=>!b.createdAt?.startsWith(today))].slice(0,MAX_AUTO_BACKUPS)); }catch(e){ console.error(e); }
 }
-function dlBackup(profile,md,eh,ch,ins,arc){
-  const blob=new Blob([JSON.stringify(mkSnap(profile,md,eh,ch,ins,arc),null,2)],{type:"application/json"});
+function dlBackup(profile,md,ins,arc){
+  const blob=new Blob([JSON.stringify(mkSnap(profile,md,ins,arc),null,2)],{type:"application/json"});
   const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=`smtm-backup-${todayStr()}.json`; a.click(); URL.revokeObjectURL(url);
 }
 
@@ -277,6 +270,96 @@ function ResetModal({onConfirm,onClose,onDownloadFirst}){
     <div style={{display:"flex",gap:10}}><Btn variant="ghost" onClick={onClose} size="sm">Cancel</Btn><Btn variant="danger" onClick={onConfirm} size="sm">Reset</Btn></div>
   </ModalCard></Overlay>;
 }
+function TxDetailModal({tx,month,monthLabel,allCats,fmt,onSave,onArchive,onClose,splitSuggestions=[]}){
+  const T=useTheme();
+  const [d,setD]=useState({
+    description:tx.description||"",
+    amount:String(tx.amount),
+    category:tx.category||"📦 Other",
+    date:tx.date||"",
+    notes:tx.notes||"",
+    split:tx.split?{with:tx.split.with||"",share:tx.split.share||0.5}:null,
+  });
+  const dirty=d.description!==(tx.description||"")||parseFloat(d.amount)!==tx.amount||d.category!==tx.category||d.date!==tx.date||(d.notes||"")!==(tx.notes||"")||JSON.stringify(d.split||null)!==JSON.stringify(tx.split||null);
+  const save=()=>{
+    const amtN=parseFloat(d.amount);
+    if(!d.description.trim()||isNaN(amtN)) return;
+    const out={...tx,description:d.description.trim(),amount:amtN,category:d.category,date:d.date,notes:d.notes.trim()||undefined};
+    if(d.split&&d.split.with?.trim()){
+      const share=Math.max(0,Math.min(1,+d.split.share||0.5));
+      out.split={with:d.split.with.trim(),share};
+    } else {
+      delete out.split;
+    }
+    onSave(out); onClose();
+  };
+  const inpS={padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"inherit",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"};
+  const isCredit=tx.amount<0;
+  const sharePct=d.split?Math.round((d.split.share||0)*100):50;
+  const yourShareAmt=d.split&&!isNaN(parseFloat(d.amount))?parseFloat(d.amount)*(d.split.share||0):null;
+  return <Overlay onClose={onClose} zIndex={400}><ModalCard maxWidth={420}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+      <p style={{margin:0,fontSize:18,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>Transaction</p>
+      <span style={{fontSize:11,color:T.textMuted,fontFamily:"'DM Mono'"}}>{monthLabel(month)}</span>
+    </div>
+    <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:14}}>
+      <div>
+        <div style={{fontSize:10,color:T.textMuted,marginBottom:4,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.5}}>DESCRIPTION</div>
+        <input type="text" value={d.description} onChange={e=>setD({...d,description:e.target.value})} style={inpS}/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div>
+          <div style={{fontSize:10,color:T.textMuted,marginBottom:4,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.5}}>AMOUNT {isCredit&&<span style={{color:T.positive}}>(credit)</span>}</div>
+          <input type="number" value={d.amount} onChange={e=>setD({...d,amount:e.target.value})} style={{...inpS,fontFamily:"'DM Mono'",fontWeight:600}}/>
+        </div>
+        <div>
+          <div style={{fontSize:10,color:T.textMuted,marginBottom:4,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.5}}>DATE</div>
+          <input type="date" value={d.date} onChange={e=>setD({...d,date:e.target.value})} style={inpS}/>
+        </div>
+      </div>
+      <div>
+        <div style={{fontSize:10,color:T.textMuted,marginBottom:4,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.5}}>CATEGORY</div>
+        <select value={d.category} onChange={e=>setD({...d,category:e.target.value})} style={inpS}>{allCats.map(c=><option key={c}>{c}</option>)}</select>
+      </div>
+      <div>
+        <div style={{fontSize:10,color:T.textMuted,marginBottom:4,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.5}}>NOTE <span style={{color:T.textMuted,fontWeight:400,letterSpacing:0,textTransform:"none"}}>(optional)</span></div>
+        <textarea value={d.notes} onChange={e=>setD({...d,notes:e.target.value})} placeholder="Add a note — what was this for, who you were with…" rows={3} style={{...inpS,resize:"vertical",minHeight:60,fontFamily:"inherit"}}/>
+      </div>
+      {/* Split with */}
+      <div style={{padding:"12px 12px",background:d.split?T.accentSoft:T.surface2,border:`1px solid ${d.split?T.accentBorder:T.borderSoft}`,borderRadius:12}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:d.split?10:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:14}}>🤝</span>
+            <span style={{fontSize:12,fontWeight:600,color:T.textPrimary}}>Split with someone</span>
+          </div>
+          <div onClick={()=>setD({...d,split:d.split?null:{with:"",share:0.5}})} style={{width:36,height:22,borderRadius:11,background:d.split?T.accent:T.borderMid,padding:2,boxSizing:"border-box",cursor:"pointer",transition:"background .15s",flexShrink:0,position:"relative"}}>
+            <div style={{width:18,height:18,borderRadius:9,background:"#fff",transform:`translateX(${d.split?14:0}px)`,transition:"transform .15s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}/>
+          </div>
+        </div>
+        {d.split&&<div style={{display:"flex",flexDirection:"column",gap:8}}>
+          <input type="text" placeholder="Who? (e.g. Mike)" list="split-suggestions" value={d.split.with} onChange={e=>setD({...d,split:{...d.split,with:e.target.value}})} style={inpS}/>
+          <datalist id="split-suggestions">{splitSuggestions.map(s=><option key={s} value={s}/>)}</datalist>
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:T.textMuted,marginBottom:4,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4}}>
+              <span>YOUR SHARE</span>
+              <span style={{color:T.accent}}>{sharePct}%</span>
+            </div>
+            <input type="range" min="0" max="100" step="5" value={sharePct} onChange={e=>setD({...d,split:{...d.split,share:parseInt(e.target.value,10)/100}})} style={{width:"100%",accentColor:T.accent}}/>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:T.textMuted,marginTop:2}}>
+              <span>0%</span><span>50%</span><span>100%</span>
+            </div>
+          </div>
+          {yourShareAmt!==null&&<div style={{fontSize:11,color:T.textSecondary,padding:"6px 10px",background:T.surface,borderRadius:8,textAlign:"center"}}>You pay <span style={{fontFamily:"'DM Mono'",fontWeight:700,color:T.accent}}>{fmt(Math.abs(yourShareAmt))}</span> of {fmt(Math.abs(parseFloat(d.amount)))}</div>}
+        </div>}
+      </div>
+    </div>
+    <div style={{display:"flex",gap:10,marginBottom:8}}>
+      <Btn variant="ghost" onClick={onClose} size="sm">Cancel</Btn>
+      <Btn onClick={save} disabled={!dirty||!d.description.trim()} size="sm">Save changes</Btn>
+    </div>
+    <button onClick={()=>{if(confirm("Move this transaction to archive?")){onArchive(tx.id,month);onClose();}}} style={{width:"100%",padding:"10px",background:"transparent",border:"none",color:T.negative,fontFamily:"inherit",fontSize:12,cursor:"pointer",marginTop:4}}>Move to archive</button>
+  </ModalCard></Overlay>;
+}
 function Check({checked,onChange}){ const T=useTheme(); return <div onClick={onChange} style={{width:22,height:22,borderRadius:7,border:`1.5px solid ${checked?T.accent:T.borderMid}`,background:checked?T.accentSoft:"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,transition:"all .15s"}}>{checked&&<svg width="12" height="10" viewBox="0 0 12 10" fill="none"><path d="M1 5L4.5 8.5L11 1" stroke={T.accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}</div>; }
 function FixedCommitModal({detected,fmt,onConfirm,onSkip}){
   const T=useTheme(); const [sel,setSel]=useState(detected.map((_,i)=>i)); const tog=i=>setSel(s=>s.includes(i)?s.filter(x=>x!==i):[...s,i]);
@@ -350,15 +433,25 @@ function Onboarding({onComplete}){
   const [currency,setCurrency]=useState("SGD");
   const [streams,setStreams]=useState([{id:`s${Date.now()}`,name:"Salary",type:"fixed",defaultAmount:0,active:true,startFrom:""}]);
   const [bills,setBills]=useState([]);
+  // Goal selection
+  const [goalType,setGoalType]=useState(null); // "save_more" | "get_out_of_debt" | "understand_spending" | "spend_less_on"
+  const [goalParams,setGoalParams]=useState({});
 
-  const finishWithProfile=(extraMonthly={})=>{
-    const profile={...DEFAULT_PROFILE,name:name.trim()||"You",currency,onboarded:true,incomeStreams:streams.filter(s=>s.name?.trim()),fixedCommitments:bills.filter(b=>b.name?.trim()&&+b.amount>0),startMonth:currentMonth()};
-    if(Object.keys(extraMonthly).length>0){ lsSave("monthlyData",extraMonthly); }
-    onComplete(profile);
+  const buildGoal=()=>{ if(!goalType) return null; return {type:goalType,params:goalParams||{}}; };
+
+  const finishWithProfile=(opts={})=>{
+    const profile={...DEFAULT_PROFILE,name:name.trim()||"You",currency,onboarded:true,incomeStreams:streams.filter(s=>s.name?.trim()),fixedCommitments:bills.filter(b=>b.name?.trim()&&+b.amount>0),startMonth:currentMonth(),goal:buildGoal()};
+    if(opts.preview){
+      const sample=generateSampleData();
+      lsSave("monthlyData",sample);
+      onComplete(profile,{preview:true});
+    } else {
+      onComplete(profile);
+    }
   };
   const skipWithSample=()=>{
     const sample=generateSampleData();
-    const profile={...DEFAULT_PROFILE,name:name.trim()||"You",currency,onboarded:true,incomeStreams:[{id:"salary_sample",name:"Salary",type:"fixed",defaultAmount:5400,active:true,startFrom:""}],fixedCommitments:[{id:`c${Date.now()}1`,name:"Rent",amount:1800,startFrom:""},{id:`c${Date.now()}2`,name:"Insurance",amount:185,startFrom:""}],startMonth:Object.keys(sample)[0]};
+    const profile={...DEFAULT_PROFILE,name:name.trim()||"You",currency,onboarded:true,incomeStreams:[{id:"salary_sample",name:"Salary",type:"fixed",defaultAmount:5400,active:true,startFrom:""}],fixedCommitments:[{id:`c${Date.now()}1`,name:"Rent",amount:1800,startFrom:""},{id:`c${Date.now()}2`,name:"Insurance",amount:185,startFrom:""}],startMonth:Object.keys(sample)[0],goal:buildGoal()};
     lsSave("monthlyData",sample);
     onComplete(profile);
   };
@@ -368,7 +461,7 @@ function Onboarding({onComplete}){
   const inpS={...inp,padding:"10px 12px",fontSize:13,background:T.surface2};
 
   const StepDots=()=><div style={{display:"flex",justifyContent:"center",gap:8,marginBottom:24}}>
-    {[0,1,2,3,4].map(i=><div key={i} style={{width:i===step?22:6,height:6,borderRadius:3,background:i===step?T.accent:i<step?T.accent:T.border,transition:"width .2s"}}/>)}
+    {[0,1,2,3,4,5].map(i=><div key={i} style={{width:i===step?22:6,height:6,borderRadius:3,background:i===step?T.accent:i<step?T.accent:T.border,transition:"width .2s"}}/>)}
   </div>;
 
   const Wrap=({children})=><div style={{minHeight:"100vh",background:T.bg,display:"flex",flexDirection:"column",justifyContent:"space-between",padding:"32px 24px 24px",fontFamily:"'DM Sans','Helvetica Neue',sans-serif"}}>
@@ -406,8 +499,54 @@ function Onboarding({onComplete}){
     </div>
   </Wrap>;
 
-  // Step 2 — Income
-  if(step===2) return <Wrap>
+  // Step 2 — Goal (NEW)
+  if(step===2){
+    const GOALS=[
+      {id:"save_more",emoji:"💰",label:"Save more",desc:"Build a savings habit, hit a target"},
+      {id:"get_out_of_debt",emoji:"🪙",label:"Get out of debt",desc:"Pay off what you owe, faster"},
+      {id:"understand_spending",emoji:"🧐",label:"Understand spending",desc:"See where your money actually goes"},
+      {id:"spend_less_on",emoji:"🎯",label:"Spend less on something",desc:"Cap a category you'd rather control"},
+    ];
+    return <Wrap>
+      <div>
+        <div style={{fontSize:24,fontWeight:800,color:T.textPrimary,letterSpacing:-0.6,marginBottom:6,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>What's your main goal?</div>
+        <div style={{fontSize:13,color:T.textSecondary,marginBottom:18}}>We'll tune your dashboard to show what matters most. You can change this later.</div>
+        <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:18}}>
+          {GOALS.map(g=>{
+            const sel=goalType===g.id;
+            return <div key={g.id} onClick={()=>{setGoalType(g.id);setGoalParams({});}} style={{padding:"14px 14px",background:sel?T.accentSoft:T.surface,border:`2px solid ${sel?T.accent:T.border}`,borderRadius:14,cursor:"pointer",display:"flex",alignItems:"center",gap:12,transition:"all .12s"}}>
+              <div style={{width:40,height:40,borderRadius:14,background:sel?T.accent+"20":T.surface2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>{g.emoji}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:14,fontWeight:700,color:T.textPrimary}}>{g.label}</div>
+                <div style={{fontSize:11,color:T.textMuted,marginTop:2,lineHeight:1.4}}>{g.desc}</div>
+              </div>
+              {sel&&<span style={{fontSize:18,color:T.accent,flexShrink:0}}>✓</span>}
+            </div>;
+          })}
+        </div>
+        {/* Inline params for goals that need one */}
+        {goalType==="get_out_of_debt"&&<div style={{padding:"12px 14px",background:T.surface,borderRadius:12,border:`1px solid ${T.border}`,marginBottom:18}}>
+          <div style={{fontSize:11,color:T.textMuted,marginBottom:6,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4}}>HOW MUCH DEBT TOTAL?</div>
+          <input type="number" inputMode="decimal" placeholder="e.g. 12000" value={goalParams.totalDebt||""} onChange={e=>setGoalParams({...goalParams,totalDebt:parseFloat(e.target.value)||0})} style={inpS}/>
+        </div>}
+        {goalType==="spend_less_on"&&<div style={{padding:"12px 14px",background:T.surface,borderRadius:12,border:`1px solid ${T.border}`,marginBottom:18}}>
+          <div style={{fontSize:11,color:T.textMuted,marginBottom:6,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4}}>WHICH CATEGORY?</div>
+          <select value={goalParams.category||""} onChange={e=>setGoalParams({...goalParams,category:e.target.value})} style={{...inpS,marginBottom:10}}>
+            <option value="">Pick one</option>
+            {BUILTIN_CATEGORIES.map(c=><option key={c}>{c}</option>)}
+          </select>
+          <div style={{fontSize:11,color:T.textMuted,marginBottom:6,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4}}>MONTHLY CAP (optional)</div>
+          <input type="number" inputMode="decimal" placeholder="e.g. 300" value={goalParams.cap||""} onChange={e=>setGoalParams({...goalParams,cap:parseFloat(e.target.value)||0})} style={inpS}/>
+        </div>}
+        <Btn onClick={()=>setStep(3)} disabled={!goalType}>Continue</Btn>
+        <button onClick={()=>{setGoalType(null);setStep(3);}} style={{marginTop:8,background:"none",border:"none",color:T.textMuted,fontSize:12,cursor:"pointer",fontFamily:"inherit",width:"100%",padding:8}}>Skip — I'm just exploring</button>
+        <button onClick={()=>setStep(1)} style={{marginTop:4,background:"none",border:"none",color:T.textMuted,fontSize:12,cursor:"pointer",fontFamily:"inherit",width:"100%",padding:8}}>← Back</button>
+      </div>
+    </Wrap>;
+  }
+
+  // Step 3 — Income (was step 2)
+  if(step===3) return <Wrap>
     <div>
       <div style={{fontSize:24,fontWeight:800,color:T.textPrimary,letterSpacing:-0.6,marginBottom:6,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>Where does money come in?</div>
       <div style={{fontSize:13,color:T.textSecondary,marginBottom:18}}>Salary, freelance, side hustles. Add as many as you have.</div>
@@ -424,13 +563,14 @@ function Onboarding({onComplete}){
         </div>)}
       </div>
       <button onClick={()=>setStreams(p=>[...p,{id:`s${Date.now()}`,name:"",type:"fixed",defaultAmount:0,active:true,startFrom:""}])} style={{width:"100%",padding:"10px",background:"transparent",border:`1px dashed ${T.borderMid}`,borderRadius:10,color:T.textMuted,fontFamily:"inherit",fontSize:12,cursor:"pointer",marginBottom:18}}>+ Add another source</button>
-      <Btn onClick={()=>setStep(3)}>Continue</Btn>
-      <button onClick={()=>setStep(3)} style={{marginTop:8,background:"none",border:"none",color:T.textMuted,fontSize:12,cursor:"pointer",fontFamily:"inherit",width:"100%",padding:8}}>Skip for now</button>
+      <Btn onClick={()=>setStep(4)}>Continue</Btn>
+      <button onClick={()=>setStep(4)} style={{marginTop:8,background:"none",border:"none",color:T.textMuted,fontSize:12,cursor:"pointer",fontFamily:"inherit",width:"100%",padding:8}}>Skip for now</button>
+      <button onClick={()=>setStep(2)} style={{marginTop:4,background:"none",border:"none",color:T.textMuted,fontSize:12,cursor:"pointer",fontFamily:"inherit",width:"100%",padding:8}}>← Back</button>
     </div>
   </Wrap>;
 
-  // Step 3 — Bills
-  if(step===3) return <Wrap>
+  // Step 4 — Bills (was step 3)
+  if(step===4) return <Wrap>
     <div>
       <div style={{fontSize:24,fontWeight:800,color:T.textPrimary,letterSpacing:-0.6,marginBottom:6,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>Any recurring bills?</div>
       <div style={{fontSize:13,color:T.textSecondary,marginBottom:18}}>Rent, insurance, loan repayments. We'll separate these from spending.</div>
@@ -444,12 +584,13 @@ function Onboarding({onComplete}){
         </div>)}
       </div>
       <button onClick={()=>setBills(p=>[...p,{id:`c${Date.now()}`,name:"",amount:0,startFrom:"",endMonth:""}])} style={{width:"100%",padding:"10px",background:"transparent",border:`1px dashed ${T.borderMid}`,borderRadius:10,color:T.textMuted,fontFamily:"inherit",fontSize:12,cursor:"pointer",marginBottom:18}}>+ Add a bill</button>
-      <Btn onClick={()=>setStep(4)}>Continue</Btn>
-      <button onClick={()=>setStep(4)} style={{marginTop:8,background:"none",border:"none",color:T.textMuted,fontSize:12,cursor:"pointer",fontFamily:"inherit",width:"100%",padding:8}}>Skip for now</button>
+      <Btn onClick={()=>setStep(5)}>Continue</Btn>
+      <button onClick={()=>setStep(5)} style={{marginTop:8,background:"none",border:"none",color:T.textMuted,fontSize:12,cursor:"pointer",fontFamily:"inherit",width:"100%",padding:8}}>Skip for now</button>
+      <button onClick={()=>setStep(3)} style={{marginTop:4,background:"none",border:"none",color:T.textMuted,fontSize:12,cursor:"pointer",fontFamily:"inherit",width:"100%",padding:8}}>← Back</button>
     </div>
   </Wrap>;
 
-  // Step 4 — Privacy / supported banks reassurance + finish
+  // Step 5 — Privacy / supported banks reassurance + finish (was step 4)
   return <Wrap>
     <div style={{textAlign:"center"}}>
       <div style={{fontSize:48,marginBottom:18,display:"inline-flex",width:72,height:72,borderRadius:36,background:T.accentSoft,color:T.accent,alignItems:"center",justifyContent:"center",fontSize:36}}>🎉</div>
@@ -459,8 +600,9 @@ function Onboarding({onComplete}){
         {banks.map(b=><div key={b} style={{padding:"5px 11px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:14,fontSize:11,color:T.textSecondary,fontWeight:500}}>{b}</div>)}
         <div style={{padding:"5px 11px",background:T.accentSoft,border:`1px solid ${T.accentBorder}`,borderRadius:14,fontSize:11,color:T.accent,fontWeight:600}}>+ any other</div>
       </div>
-      <Btn onClick={()=>finishWithProfile()}>Start tracking →</Btn>
-      <button onClick={()=>setStep(3)} style={{marginTop:10,background:"none",border:"none",color:T.textMuted,fontSize:12,cursor:"pointer",fontFamily:"inherit",width:"100%",padding:8}}>← Back</button>
+      <Btn onClick={()=>finishWithProfile({preview:true})}>See what it'll look like →</Btn>
+      <button onClick={()=>finishWithProfile()} style={{marginTop:10,background:"none",border:"none",color:T.textMuted,fontSize:12,cursor:"pointer",fontFamily:"inherit",width:"100%",padding:8}}>Skip preview, take me to my dashboard</button>
+      <button onClick={()=>setStep(4)} style={{marginTop:4,background:"none",border:"none",color:T.textMuted,fontSize:12,cursor:"pointer",fontFamily:"inherit",width:"100%",padding:8}}>← Back</button>
     </div>
   </Wrap>;
 }
@@ -477,8 +619,6 @@ export default function App(){
   const [selectedMonth,setSelectedMonth]=useState(currentMonth());
   const [profile,setProfile]=useState(null);
   const [monthlyData,setMonthlyData]=useState({});
-  const [eh,setEh]=useState({});
-  const [ch,setCh]=useState({});
   const [archive,setArchive]=useState([]);
   const [pendingTxs,setPendingTxs]=useState([]);
   const [insights,setInsights]=useState({text:"",timestamp:null});
@@ -494,6 +634,7 @@ export default function App(){
   const [uploadStep,setUploadStep]=useState(0); // 0=idle, 1=read, 2=claude, 3=categorise, 4=ready
   const [uploadFile,setUploadFile]=useState(null);
   const [uploadTxCount,setUploadTxCount]=useState(0);
+  const [uploadInsight,setUploadInsight]=useState({topCat:null,totalSpent:0,monthsCovered:0});
   // Money tab state
   const [moneyShowSubs,setMoneyShowSubs]=useState(true);
   const [catFilter,setCatFilter]=useState("All");
@@ -515,11 +656,22 @@ export default function App(){
   // IncomeBills/Goals lifted drafts
   const [ibDraft,setIbDraft]=useState(null);
   const [goalsDraft,setGoalsDraft]=useState(null);
+  // Goal editor (You-tab) draft state
+  const [goalTypeDraft,setGoalTypeDraft]=useState(null);
+  const [goalParamsDraft,setGoalParamsDraft]=useState(null);
+  // Spending trend chart — selected categories overlay (max 3)
+  const [trendCats,setTrendCats]=useState([]);
   // VarIncomeRow drafts and flash state — keyed by stream id
   const [varDrafts,setVarDrafts]=useState({});
   const [varFlash,setVarFlash]=useState({});
   // Home "Things to do" expand
   const [todosExpanded,setTodosExpanded]=useState(false);
+  const [previewMode,setPreviewMode]=useState(false);
+  // Transaction detail / edit modal
+  const [txDetailId,setTxDetailId]=useState(null);
+  const [txDetailMonth,setTxDetailMonth]=useState(null);
+  // Search state
+  const [searchQ,setSearchQ]=useState("");
   // Quick Add sheet (from + button)
   const [addMode,setAddMode]=useState("choose"); // "choose" | "quick"
   const [qaDesc,setQaDesc]=useState("");
@@ -536,18 +688,18 @@ export default function App(){
   useEffect(()=>{
     const p=lsLoad("profile"); setProfile(p||DEFAULT_PROFILE);
     const md=lsLoad("monthlyData"); if(md) setMonthlyData(md);
-    const e=lsLoad("excludeHistory"); if(e) setEh(e);
-    const c=lsLoad("catExcludeHistory"); if(c) setCh(c);
     const ins=lsLoad("insights"); if(ins) setInsights(ins);
     const arc=lsLoad("archive"); if(arc) setArchive(arc);
+    // Silent migration: remove deprecated habit-system keys from previous versions
+    try{ localStorage.removeItem("excludeHistory"); localStorage.removeItem("catExcludeHistory"); }catch(e){}
   },[]);
   useEffect(()=>{ if(profile?.startMonth&&selectedMonth<profile.startMonth) setSelectedMonth(profile.startMonth); },[profile?.startMonth]);
   useEffect(()=>{
     if(!profile?.onboarded) return;
     clearTimeout(backupTimer.current);
-    backupTimer.current=setTimeout(()=>autoBackup(profile,monthlyData,eh,ch,insights,archive),3000);
+    backupTimer.current=setTimeout(()=>autoBackup(profile,monthlyData,insights,archive),3000);
     return()=>clearTimeout(backupTimer.current);
-  },[profile,monthlyData,eh,ch,archive]);
+  },[profile,monthlyData,archive]);
 
   const theme=useMemo(()=>buildTheme(profile?.accentColor||CALM_DEFAULT_ACCENT, profile?.bgColor||CALM_DEFAULT_BG),[profile?.accentColor,profile?.bgColor]);
   const T=theme;
@@ -557,12 +709,12 @@ export default function App(){
   const saveArchive=arr=>{ setArchive(arr); lsSave("archive",arr); };
   const showToast=msg=>setToast(msg);
   const doReset=()=>{ lsClear(); window.location.reload(); };
-  const doRestore=snap=>{ saveProfile(snap.profile||DEFAULT_PROFILE); lsSave("monthlyData",snap.monthlyData||{}); setMonthlyData(snap.monthlyData||{}); lsSave("excludeHistory",snap.excludeHistory||{}); setEh(snap.excludeHistory||{}); lsSave("catExcludeHistory",snap.catExcludeHistory||{}); setCh(snap.catExcludeHistory||{}); if(snap.insights){setInsights(snap.insights);lsSave("insights",snap.insights);} if(snap.archive){saveArchive(snap.archive);} setRestoreCandidate(null); showToast("✓ Backup restored"); window.location.reload(); };
+  const doRestore=snap=>{ saveProfile(snap.profile||DEFAULT_PROFILE); lsSave("monthlyData",snap.monthlyData||{}); setMonthlyData(snap.monthlyData||{}); if(snap.insights){setInsights(snap.insights);lsSave("insights",snap.insights);} if(snap.archive){saveArchive(snap.archive);} setRestoreCandidate(null); showToast("✓ Backup restored"); window.location.reload(); };
 
   // Lifetime saved (across all months)
   const allTimeSaved=useMemo(()=>Object.entries(monthlyData).filter(([m])=>!profile?.startMonth||m>=profile.startMonth).reduce((total,[m,md])=>{
     const inc=totalIncome(streams,md.incomeOverrides||{},m);
-    const spent=(md.txs||[]).reduce((s,t)=>s+t.amount,0);
+    const spent=(md.txs||[]).reduce((s,t)=>s+effectiveAmount(t),0);
     const fix=(md.fixedOverrides||profile?.fixedCommitments||[]).filter(c=>(!c.startFrom||m>=c.startFrom)&&(!c.endMonth||m<=c.endMonth)).reduce((s,c)=>s+(+c.amount||0),0);
     return total+(inc-spent-fix);
   },0),[monthlyData,streams,profile]);
@@ -577,7 +729,7 @@ export default function App(){
       if(profile?.startMonth&&m<profile.startMonth) continue;
       const md=monthlyData[m]||{txs:[],incomeOverrides:{}};
       const inc=totalIncome(streams,md.incomeOverrides||{},m);
-      const spent=(md.txs||[]).reduce((s,t)=>s+t.amount,0);
+      const spent=(md.txs||[]).reduce((s,t)=>s+effectiveAmount(t),0);
       const fix=(md.fixedOverrides||profile?.fixedCommitments||[]).filter(c=>(!c.startFrom||m>=c.startFrom)&&(!c.endMonth||m<=c.endMonth)).reduce((s,c)=>s+(+c.amount||0),0);
       const isCurrent=m===currentMonth();
       // For current month, also compute projected
@@ -590,6 +742,256 @@ export default function App(){
     }
     return out;
   },[monthlyData,streams,profile,selectedMonth]);
+
+  // ── Spending trend (cross-month, always ends at CURRENT month, not selectedMonth) ─
+  const spendingTrend=useMemo(()=>{
+    const out=[];
+    const today=new Date();
+    const curYear=today.getFullYear(), curMo=today.getMonth();
+    // Last 6 months ending at the current month
+    for(let i=5;i>=0;i--){
+      const d=new Date(curYear,curMo-i,1);
+      const m=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+      if(profile?.startMonth&&m<profile.startMonth) continue;
+      const md=monthlyData[m]||{txs:[],incomeOverrides:{}};
+      const txs=(md.txs||[]);
+      // Only count debits (amount > 0 = spending in our convention)
+      const total=txs.filter(t=>t.amount>0).reduce((s,t)=>s+effectiveAmount(t),0);
+      const byCat={};
+      txs.filter(t=>t.amount>0).forEach(t=>{byCat[t.category]=(byCat[t.category]||0)+effectiveAmount(t);});
+      out.push({month:m,total,byCat,hasData:txs.length>0});
+    }
+    return out;
+  },[monthlyData,profile?.startMonth]);
+
+  // Top categories across the trend window (for chip options)
+  const trendTopCategories=useMemo(()=>{
+    const agg={};
+    spendingTrend.forEach(p=>{ Object.entries(p.byCat).forEach(([cat,amt])=>{ agg[cat]=(agg[cat]||0)+amt; }); });
+    return Object.entries(agg).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([cat])=>cat);
+  },[spendingTrend]);
+
+  const detectedSubscriptions=useMemo(()=>{
+    const months=Object.keys(monthlyData).filter(m=>!profile?.startMonth||m>=profile.startMonth).sort();
+    if(months.length<1) return [];
+    const desc={};
+    months.forEach(m=>{(monthlyData[m]?.txs||[]).forEach(t=>{
+      const k=t.description?.toLowerCase().trim(); if(!k) return;
+      if(!desc[k]) desc[k]={count:0,amounts:[],description:t.description,category:t.category,monthsSeen:new Set(),lastDate:""};
+      desc[k].count++; desc[k].amounts.push(Math.abs(t.amount)); desc[k].monthsSeen.add(m);
+      if(t.date>desc[k].lastDate) desc[k].lastDate=t.date;
+    });});
+    const COLS=getAllCatCols(profile?.customCategories);
+    return Object.values(desc)
+      .filter(({monthsSeen,category})=>monthsSeen.size>=2&&(category==="📱 Subscription"||category==="🎬 Entertainment"))
+      .map(({description,count,amounts,category,monthsSeen,lastDate})=>{
+        const avg=amounts.reduce((a,b)=>a+b,0)/amounts.length;
+        const stdDev=Math.sqrt(amounts.reduce((s,a)=>s+(a-avg)**2,0)/amounts.length);
+        const priceChange=amounts[amounts.length-1]>amounts[0]?amounts[amounts.length-1]-amounts[0]:0;
+        return {description,count,amount:avg,category,monthsSeen:monthsSeen.size,lastDate,priceChange,color:COLS[category]||"#868E96"};
+      })
+      .sort((a,b)=>b.amount-a.amount);
+  },[monthlyData,profile?.startMonth,profile?.customCategories]);
+
+  // ── INSIGHTS catalog ───────────────────────────────────────────────────────
+  // Each insight: {id, label, description, value, ready} — `ready` means it has enough data to show meaningfully
+  const insightCatalog=useMemo(()=>{
+    const out=[];
+    const allMonths=Object.entries(monthlyData).filter(([m,md])=>(md.txs||[]).length>0||Object.keys(md.incomeOverrides||{}).length>0).sort(([a],[b])=>a.localeCompare(b));
+    const curM=monthlyData[selectedMonth]||{txs:[],incomeOverrides:{}};
+    const curInc=totalIncome(streams,curM.incomeOverrides||{},selectedMonth);
+    const curSpent=(curM.txs||[]).reduce((s,t)=>s+effectiveAmount(t),0);
+    const curFix=(curM.fixedOverrides||profile?.fixedCommitments||[]).filter(c=>(!c.startFrom||selectedMonth>=c.startFrom)&&(!c.endMonth||selectedMonth<=c.endMonth)).reduce((s,c)=>s+(+c.amount||0),0);
+    const curSaved=curInc-curSpent-curFix;
+    const curRate=curInc>0?(curSaved/curInc*100):null;
+    // Past months (excluding current)
+    const past=allMonths.filter(([m])=>m!==selectedMonth);
+
+    // 1) Savings rate vs average
+    {
+      const rates=past.map(([m,md])=>{
+        const inc=totalIncome(streams,md.incomeOverrides||{},m);
+        const sp=(md.txs||[]).reduce((s,t)=>s+effectiveAmount(t),0);
+        const fx=(md.fixedOverrides||profile?.fixedCommitments||[]).filter(c=>(!c.startFrom||m>=c.startFrom)&&(!c.endMonth||m<=c.endMonth)).reduce((s,c)=>s+(+c.amount||0),0);
+        return inc>0?((inc-sp-fx)/inc*100):null;
+      }).filter(r=>r!==null);
+      const avg=rates.length>0?rates.reduce((s,r)=>s+r,0)/rates.length:null;
+      const ready=curRate!==null&&avg!==null&&rates.length>=2;
+      out.push({
+        id:"savings_vs_avg", icon:"📊", label:"Savings rate vs your average",
+        description:"How your savings rate this month compares to your historical average",
+        ready,
+        value:ready?{rate:curRate,avg,delta:curRate-avg}:null,
+        renderHome:ready?(ctx)=>{
+          const better=curRate>=avg;
+          return <div style={{padding:"12px 14px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+              <span style={{fontSize:18}}>📊</span>
+              <span style={{fontSize:11,color:ctx.T.textMuted,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4}}>SAVINGS RATE</span>
+            </div>
+            <div style={{fontSize:13,color:ctx.T.textPrimary,lineHeight:1.5}}>You're saving <span style={{fontWeight:700,color:better?ctx.T.accent:ctx.T.warning}}>{curRate.toFixed(0)}%</span> this month, vs your <span style={{fontWeight:700}}>{avg.toFixed(0)}%</span> average. {better?"Nice — you're ahead of your usual.":`Down ${Math.abs(curRate-avg).toFixed(0)} points.`}</div>
+          </div>;
+        }:null
+      });
+    }
+
+    // 2) Highest-ever per category
+    {
+      const curByCat={}; (curM.txs||[]).forEach(t=>{ if(t.amount>0){ curByCat[t.category]=(curByCat[t.category]||0)+effectiveAmount(t); } });
+      let bestCat=null, bestAmt=0, bestRecord=0;
+      Object.entries(curByCat).forEach(([cat,amt])=>{
+        // Find max for this category in past months
+        let record=0;
+        past.forEach(([m,md])=>{ const sum=(md.txs||[]).filter(t=>t.category===cat&&t.amount>0).reduce((s,t)=>s+effectiveAmount(t),0); if(sum>record) record=sum; });
+        if(amt>record&&amt>bestAmt&&record>0){ bestCat=cat; bestAmt=amt; bestRecord=record; }
+      });
+      const ready=!!bestCat;
+      out.push({
+        id:"highest_category", icon:"⚠", label:"Highest-ever in a category",
+        description:"When this month tops every previous month for a category",
+        ready,
+        value:ready?{cat:bestCat,amt:bestAmt,prevMax:bestRecord}:null,
+        renderHome:ready?(ctx)=>{
+          return <div style={{padding:"12px 14px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+              <span style={{fontSize:18}}>⚠</span>
+              <span style={{fontSize:11,color:ctx.T.textMuted,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4}}>NEW HIGH</span>
+            </div>
+            <div style={{fontSize:13,color:ctx.T.textPrimary,lineHeight:1.5}}>Your <span style={{fontWeight:700}}>{bestCat.split(" ").slice(1).join(" ")||bestCat}</span> this month is <span style={{fontWeight:700,color:ctx.T.warning}}>{ctx.fmt(bestAmt)}</span>, more than your previous high of <span style={{fontFamily:"'DM Mono'"}}>{ctx.fmt(bestRecord)}</span>.</div>
+          </div>;
+        }:null
+      });
+    }
+
+    // 3) Subscription drift
+    {
+      const detected=detectedSubscriptions||[];
+      const curSubTotal=detected.reduce((s,x)=>s+x.amount,0);
+      // Compare with subscription total ~6 months ago
+      const sixMonthsAgo=allMonths.length>=6?allMonths[allMonths.length-6]:allMonths[0];
+      let oldSubTotal=0;
+      if(sixMonthsAgo){
+        const [m,md]=sixMonthsAgo;
+        // Heuristic: a subscription is a transaction whose description appears in 2+ months around then
+        const txsAround=(md.txs||[]).filter(t=>t.amount>0);
+        const grouped={};
+        txsAround.forEach(t=>{ const k=(t.description||"").toLowerCase(); if(!grouped[k]) grouped[k]={count:0,amt:0,n:0}; grouped[k].amt+=t.amount; grouped[k].n+=1; });
+        // For each distinct merchant, just sum once (use latest)
+        Object.values(grouped).forEach(g=>{ if(g.n>=1) oldSubTotal+=g.amt/g.n; });
+        // Take a slimmer approximation: sum of categorically-recurring items
+        oldSubTotal=(md.txs||[]).filter(t=>(t.category||"").toLowerCase().includes("subscription")||(t.description||"").toLowerCase().match(/netflix|spotify|prime|youtube|apple|hbo|disney/i)).reduce((s,t)=>s+effectiveAmount(t),0);
+      }
+      const diff=curSubTotal-oldSubTotal;
+      const ready=curSubTotal>0&&allMonths.length>=4&&Math.abs(diff)>5;
+      out.push({
+        id:"sub_drift", icon:"📱", label:"Subscription drift",
+        description:"Total monthly subscription cost vs months ago",
+        ready,
+        value:ready?{now:curSubTotal,then:oldSubTotal,diff}:null,
+        renderHome:ready?(ctx)=>{
+          const up=diff>0;
+          return <div style={{padding:"12px 14px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+              <span style={{fontSize:18}}>📱</span>
+              <span style={{fontSize:11,color:ctx.T.textMuted,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4}}>SUBSCRIPTIONS</span>
+            </div>
+            <div style={{fontSize:13,color:ctx.T.textPrimary,lineHeight:1.5}}>Your monthly subscriptions <span style={{fontWeight:700,color:up?ctx.T.warning:ctx.T.accent}}>{up?"grew":"shrank"} {ctx.fmt(Math.abs(diff))}</span> since you started tracking. Now <span style={{fontFamily:"'DM Mono'",fontWeight:700}}>{ctx.fmt(curSubTotal)}/mo</span>.</div>
+          </div>;
+        }:null
+      });
+    }
+
+    // 4) Bill changes
+    {
+      // Look at user-defined fixedCommitments — has any amount changed in the past 3 months?
+      const bills=profile?.fixedCommitments||[];
+      let biggestBillChange=null;
+      bills.forEach(b=>{
+        // Bills have a single amount field — no history. Skip for now, leave hook for future.
+      });
+      const ready=false; // Bills tracking history not yet implemented; this insight is a placeholder
+      out.push({
+        id:"bill_changes", icon:"📄", label:"Bill changes",
+        description:"Heads-up when a bill's amount changes (coming soon)",
+        ready, value:null, renderHome:null, comingSoon:true
+      });
+    }
+
+    // 5) Income trend
+    {
+      const incomes=allMonths.map(([m,md])=>totalIncome(streams,md.incomeOverrides||{},m));
+      const ready=incomes.length>=4;
+      if(ready){
+        const recent3=incomes.slice(-4,-1); // last 3 before current
+        const avgRecent=recent3.reduce((s,v)=>s+v,0)/recent3.length;
+        const cur=incomes[incomes.length-1];
+        const diff=cur-avgRecent;
+        const pct=avgRecent>0?(diff/avgRecent*100):0;
+        const ready2=Math.abs(pct)>=5; // only show if meaningfully different
+        out.push({
+          id:"income_trend", icon:"💰", label:"Income trend",
+          description:"How this month's income compares to your recent average",
+          ready:ready2,
+          value:ready2?{cur,avgRecent,pct}:null,
+          renderHome:ready2?(ctx)=>{
+            const up=diff>0;
+            return <div style={{padding:"12px 14px"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+                <span style={{fontSize:18}}>💰</span>
+                <span style={{fontSize:11,color:ctx.T.textMuted,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4}}>INCOME TREND</span>
+              </div>
+              <div style={{fontSize:13,color:ctx.T.textPrimary,lineHeight:1.5}}>Income is <span style={{fontWeight:700,color:up?ctx.T.accent:ctx.T.warning}}>{up?"up":"down"} {Math.abs(pct).toFixed(0)}%</span> vs your last 3 months. {up?"Nice month.":"Worth a look."}</div>
+            </div>;
+          }:null
+        });
+      } else {
+        out.push({id:"income_trend",icon:"💰",label:"Income trend",description:"How this month's income compares to your recent average",ready:false,value:null,renderHome:null});
+      }
+    }
+
+    // 6) Category vs usual
+    {
+      const curByCat={}; (curM.txs||[]).forEach(t=>{ if(t.amount>0){ curByCat[t.category]=(curByCat[t.category]||0)+effectiveAmount(t); } });
+      let topCat=null, topAmt=0, topAvg=0, topPct=0;
+      Object.entries(curByCat).forEach(([cat,amt])=>{
+        const pastAmts=past.map(([m,md])=>(md.txs||[]).filter(t=>t.category===cat&&t.amount>0).reduce((s,t)=>s+effectiveAmount(t),0));
+        if(pastAmts.length<2) return;
+        const avg=pastAmts.reduce((s,v)=>s+v,0)/pastAmts.length;
+        if(avg<10) return;
+        const pct=(amt-avg)/avg*100;
+        if(Math.abs(pct)>=25&&Math.abs(pct)>Math.abs(topPct)){ topCat=cat; topAmt=amt; topAvg=avg; topPct=pct; }
+      });
+      const ready=!!topCat&&past.length>=2;
+      out.push({
+        id:"category_vs_usual", icon:"📈", label:"Category vs your usual",
+        description:"When a category is significantly higher or lower than your norm",
+        ready,
+        value:ready?{cat:topCat,amt:topAmt,avg:topAvg,pct:topPct}:null,
+        renderHome:ready?(ctx)=>{
+          const up=topPct>0;
+          return <div style={{padding:"12px 14px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+              <span style={{fontSize:18}}>📈</span>
+              <span style={{fontSize:11,color:ctx.T.textMuted,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4}}>UNUSUAL</span>
+            </div>
+            <div style={{fontSize:13,color:ctx.T.textPrimary,lineHeight:1.5}}><span style={{fontWeight:700}}>{topCat.split(" ").slice(1).join(" ")||topCat}</span> is <span style={{fontWeight:700,color:up?ctx.T.warning:ctx.T.accent}}>{up?"up":"down"} {Math.abs(topPct).toFixed(0)}%</span> ({ctx.fmt(topAmt)}) vs your usual {ctx.fmt(topAvg)}.</div>
+          </div>;
+        }:null
+      });
+    }
+
+    return out;
+  },[monthlyData,streams,profile,selectedMonth,detectedSubscriptions]);
+
+  // Active insights — only enabled ones with data
+  const activeInsights=insightCatalog.filter(i=>(profile?.insightPrefs||[]).includes(i.id)&&i.ready);
+  // Day-rotation when more than 2 enabled — keeps it fresh
+  const visibleInsights=(()=>{
+    if(activeInsights.length<=2) return activeInsights;
+    const day=Math.floor(Date.now()/86400000);
+    const start=day%activeInsights.length;
+    return [activeInsights[start],activeInsights[(start+1)%activeInsights.length]];
+  })();
 
   // ── Handlers (upload, transactions, income) ────────────────────────────────
   const saveMD=async(month,updates)=>{
@@ -617,16 +1019,26 @@ export default function App(){
     await saveMD(selectedMonth,{incomeOverrides:cur});
     showToast("Removed");
   };
-  const archiveTx=async id=>{
-    const md0=monthlyData[selectedMonth]||{}; const tx=(md0.txs||[]).find(t=>t.id===id); if(!tx) return;
+  const archiveTx=async(id,monthHint)=>{
+    const m=monthHint||selectedMonth;
+    const md0=monthlyData[m]||{}; const tx=(md0.txs||[]).find(t=>t.id===id); if(!tx) return;
     saveArchive([{...tx,archivedAt:new Date().toISOString()},...archive].slice(0,500));
-    await saveMD(selectedMonth,{txs:(md0.txs||[]).filter(t=>t.id!==id)});
+    await saveMD(m,{txs:(md0.txs||[]).filter(t=>t.id!==id)});
     showToast("Moved to archive");
   };
-  const editTx=async draft=>{
-    const md0=monthlyData[selectedMonth]||{};
-    await saveMD(selectedMonth,{txs:(md0.txs||[]).map(t=>t.id===draft.id?draft:t)});
+  const editTx=async(draft,monthHint)=>{
+    const m=monthHint||selectedMonth;
+    const md0=monthlyData[m]||{};
+    await saveMD(m,{txs:(md0.txs||[]).map(t=>t.id===draft.id?draft:t)});
     showToast("Updated");
+  };
+  // Find a transaction by ID across all months (used for search-result clicks)
+  const findTx=id=>{
+    for(const [m,md] of Object.entries(monthlyData)){
+      const t=(md.txs||[]).find(t=>t.id===id);
+      if(t) return {tx:t,month:m};
+    }
+    return null;
   };
   const addManual=async({description,amount,category,date})=>{
     if(!description?.trim()||!amount||isNaN(+amount)||+amount<=0) return;
@@ -673,7 +1085,6 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     return JSON.parse(raw);
   };
 
-  const {mf,cf}=habitFlags(eh,ch);
   const handleFile=async e=>{
     const file=e.target.files[0]; if(!file) return;
     setUploading(true); setUploadMsg("");
@@ -701,18 +1112,25 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         const validCats=[...CATS,...FIXED_CATS];
         const cat=validCats.includes(t.category)?t.category:"📦 Other";
         if(isFixedCat(cat)&&!isCredit){
-          fixedDetected.push({id:`fd${nonce}${i}`,description:t.description||"Unknown",category:cat,rawAmount:Math.abs(amount),date:t.date||todayStr(),fullTx:{id:`${nonce}${i}f`,date:t.date||todayStr(),description:t.description||"Unknown",amount,category:cat,source:"imported",checked:false,habitReason:null}});
+          fixedDetected.push({id:`fd${nonce}${i}`,description:t.description||"Unknown",category:cat,rawAmount:Math.abs(amount),date:t.date||todayStr(),fullTx:{id:`${nonce}${i}f`,date:t.date||todayStr(),description:t.description||"Unknown",amount,category:cat,source:"imported",checked:true}});
           return null;
         }
-        const reason=habitReason({description:(t.description||"").toLowerCase().trim(),category:cat},mf,cf);
-        return {id:`${nonce}${i}`,date:t.date||todayStr(),description:t.description||"Unknown",amount,category:cat,source:"imported",checked:!reason,habitReason:reason};
+        return {id:`${nonce}${i}`,date:t.date||todayStr(),description:t.description||"Unknown",amount,category:cat,source:"imported",checked:true};
       }).filter(Boolean);
       setPendingTxs(p=>[...p,...imported]);
       if(fixedDetected.length>0) setFixedCommitDetected(fixedDetected);
-      setUploadStep(4); setUploadTxCount(imported.length);
+      // Compute progressive reveal insight
+      const debits=imported.filter(t=>t.amount>0);
+      const totalSpent=debits.reduce((s,t)=>s+effectiveAmount(t),0);
+      const catTotals={}; debits.forEach(t=>{catTotals[t.category]=(catTotals[t.category]||0)+t.amount;});
+      const sortedCats=Object.entries(catTotals).sort((a,b)=>b[1]-a[1]);
+      const topCat=sortedCats[0]?sortedCats[0][0]:null;
       const months=[...new Set(imported.map(t=>monthKey(t.date)))].sort();
+      setUploadInsight({topCat,totalSpent,monthsCovered:months.length});
+      setUploadStep(4); setUploadTxCount(imported.length);
       setUploadMsg(`✓ Found ${imported.length} transactions across ${months.length} month${months.length>1?"s":""}`);
-      setTimeout(()=>{setSubScreen("review");},700);
+      // Allow more time on step 4 for the user to see the reveal before opening review
+      setTimeout(()=>{setSubScreen("review");},1800);
     }catch(err){
       console.error(err); const msg=err.message||"Unknown error"; setUploadStep(0);
       if(msg.includes("504")||msg.includes("timeout")||msg.includes("aborted")) setUploadMsg("⚠ Timed out. Try a smaller file or better connection.");
@@ -743,28 +1161,6 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
   };
 
   // Detect subscriptions (recurring across 2+ months) for the Subscriptions section
-  const detectedSubscriptions=useMemo(()=>{
-    const months=Object.keys(monthlyData).filter(m=>!profile?.startMonth||m>=profile.startMonth).sort();
-    if(months.length<1) return [];
-    const desc={};
-    months.forEach(m=>{(monthlyData[m]?.txs||[]).forEach(t=>{
-      const k=t.description?.toLowerCase().trim(); if(!k) return;
-      if(!desc[k]) desc[k]={count:0,amounts:[],description:t.description,category:t.category,monthsSeen:new Set(),lastDate:""};
-      desc[k].count++; desc[k].amounts.push(Math.abs(t.amount)); desc[k].monthsSeen.add(m);
-      if(t.date>desc[k].lastDate) desc[k].lastDate=t.date;
-    });});
-    const COLS=getAllCatCols(profile?.customCategories);
-    return Object.values(desc)
-      .filter(({monthsSeen,category})=>monthsSeen.size>=2&&(category==="📱 Subscription"||category==="🎬 Entertainment"))
-      .map(({description,count,amounts,category,monthsSeen,lastDate})=>{
-        const avg=amounts.reduce((a,b)=>a+b,0)/amounts.length;
-        const stdDev=Math.sqrt(amounts.reduce((s,a)=>s+(a-avg)**2,0)/amounts.length);
-        const priceChange=amounts[amounts.length-1]>amounts[0]?amounts[amounts.length-1]-amounts[0]:0;
-        return {description,count,amount:avg,category,monthsSeen:monthsSeen.size,lastDate,priceChange,color:COLS[category]||"#868E96"};
-      })
-      .sort((a,b)=>b.amount-a.amount);
-  },[monthlyData,profile?.startMonth,profile?.customCategories]);
-
   // ── You-tab hooks (must be at top level, BEFORE early returns) ─────────────
   const [youSection,setYouSection]=useState(null);
   const [pName,setPName]=useState((profile?.name)||"");
@@ -801,14 +1197,22 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       <style>{`@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}`}</style>
     </div>;
   }
-  if(!profile.onboarded) return <ThemeCtx.Provider value={theme}><Onboarding onComplete={saveProfile}/></ThemeCtx.Provider>;
+  if(!profile.onboarded) return <ThemeCtx.Provider value={theme}><Onboarding onComplete={(p,opts)=>{
+    saveProfile(p);
+    if(opts?.preview){
+      // Load the sample data that Onboarding wrote to localStorage into state
+      const sample=lsLoad("monthlyData")||{};
+      setMonthlyData(sample);
+      setPreviewMode(true);
+    }
+  }}/></ThemeCtx.Provider>;
 
   // ── Compute current-month derived values for Home ──────────────────────────
   const md=monthlyData[selectedMonth]||{txs:[],incomeOverrides:{}};
   const ov=md.incomeOverrides||{};
   const incTotal=totalIncome(streams,ov,selectedMonth);
   const txs=md.txs||[];
-  const varTotal=txs.reduce((s,t)=>s+t.amount,0);
+  const varTotal=txs.reduce((s,t)=>s+effectiveAmount(t),0);
   const monthFixed=(md.fixedOverrides||profile?.fixedCommitments||[]).filter(c=>(!c.startFrom||selectedMonth>=c.startFrom)&&(!c.endMonth||selectedMonth<=c.endMonth));
   const fixedTotal=monthFixed.reduce((s,c)=>s+(+c.amount||0),0);
   const saved=incTotal-varTotal-fixedTotal;
@@ -816,12 +1220,12 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
   const pm=prevMonth(selectedMonth);
   const pmd=monthlyData[pm]||{txs:[],incomeOverrides:{}};
   const prevOv=pmd.incomeOverrides||{};
-  const prevVarTotal=(pmd.txs||[]).reduce((s,t)=>s+t.amount,0);
+  const prevVarTotal=(pmd.txs||[]).reduce((s,t)=>s+effectiveAmount(t),0);
   const prevIncTotal=totalIncome(streams,prevOv,pm);
   const prevFixed=(pmd.fixedOverrides||profile?.fixedCommitments||[]).filter(c=>(!c.startFrom||pm>=c.startFrom)&&(!c.endMonth||pm<=c.endMonth)).reduce((s,c)=>s+(+c.amount||0),0);
   const prevSaved=prevIncTotal-prevVarTotal-prevFixed;
   const savedDelta=saved-prevSaved;
-  const byCat=(()=>{ const m={}; txs.forEach(t=>{m[t.category]=(m[t.category]||0)+t.amount;}); return Object.entries(m).sort((a,b)=>b[1]-a[1]); })();
+  const byCat=(()=>{ const m={}; txs.forEach(t=>{m[t.category]=(m[t.category]||0)+effectiveAmount(t);}); return Object.entries(m).sort((a,b)=>b[1]-a[1]); })();
   const COLS=getAllCatCols(profile.customCategories);
   const today=new Date();
   const isCurMonth=monthKey(today.toISOString())===selectedMonth;
@@ -933,17 +1337,8 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       updated={...updated,[m]:{...(updated[m]||{txs:[],incomeOverrides:{}}),txs:[...txs,...cur]}};
     }
     setMonthlyData(updated); lsSave("monthlyData",updated);
-    // Update habit memory for skipped
+    // Archive skipped transactions (recoverable later)
     if(skipped.length>0){
-      const newEh={...eh};
-      skipped.forEach(t=>{
-        const k=t.description?.toLowerCase().trim();
-        if(k){
-          const ex=newEh[k]; const count=(typeof ex==="object"?ex.count:ex||0)+1;
-          newEh[k]={count,lastTx:{description:t.description,date:t.date,amount:t.amount,category:t.category}};
-        }
-      });
-      setEh(newEh); lsSave("excludeHistory",newEh);
       saveArchive([...skipped.map(t=>({...t,archivedAt:new Date().toISOString()})),...archive].slice(0,500));
     }
     setPendingTxs([]); setSubScreen(null);
@@ -1075,7 +1470,6 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
               <div style={{fontSize:13,color:T.textMuted,marginBottom:16}}>{current.category}</div>
               <div style={{fontSize:42,fontWeight:700,color:isCredit?T.positive:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif",letterSpacing:-1.5,lineHeight:1}}>{isCredit?"+":""}{fmt(Math.abs(current.amount))}</div>
             </div>
-            {current.habitReason&&<div style={{padding:"10px 14px",background:T.warning+"15",border:`1px solid ${T.warning}30`,borderRadius:12,marginTop:14,fontSize:11,color:T.warning,textAlign:"center",fontWeight:500}}>⚠ {current.habitReason}</div>}
           </div>
         </div>
       </div>
@@ -1127,8 +1521,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
   </div>;
 
   const IdentitySection=()=>{
-    const saveIdentity=()=>{ saveProfile({...profile,name:pName.trim(),occupation:pOcc.trim(),currency:pCurrency,startMonth:pStartMonth}); showToast("✓ Profile updated"); setYouSection(null); };
-    return <div style={{padding:"14px 16px",borderTop:`1px solid ${T.borderSoft}`}}>
+    const saveIdentity=()=>{ saveProfile({...profile,name:pName.trim(),occupation:pOcc.trim(),currency:pCurrency,startMonth:pStartMonth}); showToast("✓ Profile updated"); setYouSection(null); };    return <div style={{padding:"14px 16px",borderTop:`1px solid ${T.borderSoft}`}}>
       <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
         <div onClick={()=>avatarRef.current.click()} style={{position:"relative",width:64,height:64,flexShrink:0,cursor:"pointer"}}>
           {profile.avatar?<img src={profile.avatar} alt="" style={{width:64,height:64,borderRadius:32,objectFit:"cover"}}/>:<div style={{width:64,height:64,borderRadius:32,background:T.accentSoft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,fontWeight:700,color:T.accent}}>{(profile.name||"?")[0].toUpperCase()}</div>}
@@ -1150,6 +1543,55 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         </div>
       </div>
       <Btn onClick={saveIdentity} size="sm">Save changes</Btn>
+    </div>;
+  };
+
+  const GoalSection=()=>{
+    const cur=profile.goal||{type:null,params:{}};
+    const type=goalTypeDraft!==null?goalTypeDraft:cur.type;
+    const params=goalParamsDraft!==null?goalParamsDraft:(cur.params||{});
+    const setType=v=>{setGoalTypeDraft(v);setGoalParamsDraft({});};
+    const setParams=v=>setGoalParamsDraft(v);
+    const GOALS=[
+      {id:"save_more",emoji:"💰",label:"Save more",desc:"Build a savings habit, hit a target"},
+      {id:"get_out_of_debt",emoji:"🪙",label:"Get out of debt",desc:"Pay off what you owe, faster"},
+      {id:"understand_spending",emoji:"🧐",label:"Understand spending",desc:"See where your money actually goes"},
+      {id:"spend_less_on",emoji:"🎯",label:"Spend less on something",desc:"Cap a category you'd rather control"},
+    ];
+    const inpS={padding:"9px 11px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:9,color:T.textPrimary,fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",boxSizing:"border-box"};
+    const save=()=>{ saveProfile({...profile,goal:type?{type,params}:null}); setGoalTypeDraft(null); setGoalParamsDraft(null); showToast("✓ Goal updated"); setYouSection(null); };
+    const clear=()=>{ saveProfile({...profile,goal:null}); setGoalTypeDraft(null); setGoalParamsDraft(null); showToast("Goal cleared"); setYouSection(null); };
+    return <div style={{padding:"14px 16px",borderTop:`1px solid ${T.borderSoft}`}}>
+      <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:14}}>
+        {GOALS.map(g=>{
+          const sel=type===g.id;
+          return <div key={g.id} onClick={()=>{setType(g.id);setParams({});}} style={{padding:"10px 12px",background:sel?T.accentSoft:T.surface2,border:`1.5px solid ${sel?T.accent:T.borderSoft}`,borderRadius:12,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:28,height:28,borderRadius:10,background:sel?T.accent+"20":"transparent",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{g.emoji}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>{g.label}</div>
+              <div style={{fontSize:10,color:T.textMuted,marginTop:1,lineHeight:1.4}}>{g.desc}</div>
+            </div>
+            {sel&&<span style={{fontSize:14,color:T.accent,flexShrink:0}}>✓</span>}
+          </div>;
+        })}
+      </div>
+      {type==="get_out_of_debt"&&<div style={{marginBottom:12}}>
+        <div style={{fontSize:10,color:T.textMuted,marginBottom:5,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4}}>TOTAL DEBT</div>
+        <input type="number" inputMode="decimal" placeholder="e.g. 12000" value={params.totalDebt||""} onChange={e=>setParams({...params,totalDebt:parseFloat(e.target.value)||0})} style={inpS}/>
+      </div>}
+      {type==="spend_less_on"&&<div style={{marginBottom:12}}>
+        <div style={{fontSize:10,color:T.textMuted,marginBottom:5,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4}}>CATEGORY</div>
+        <select value={params.category||""} onChange={e=>setParams({...params,category:e.target.value})} style={{...inpS,marginBottom:8}}>
+          <option value="">Pick one</option>
+          {CATS.map(c=><option key={c}>{c}</option>)}
+        </select>
+        <div style={{fontSize:10,color:T.textMuted,marginBottom:5,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4}}>MONTHLY CAP</div>
+        <input type="number" inputMode="decimal" placeholder="e.g. 300" value={params.cap||""} onChange={e=>setParams({...params,cap:parseFloat(e.target.value)||0})} style={inpS}/>
+      </div>}
+      <div style={{display:"flex",gap:8}}>
+        <Btn onClick={save} size="sm" disabled={!type}>Save</Btn>
+        {cur.type&&<Btn onClick={clear} size="sm" variant="ghost">Clear goal</Btn>}
+      </div>
     </div>;
   };
 
@@ -1242,7 +1684,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     return <div style={{padding:"4px 0"}}>
       <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,overflow:"hidden",marginBottom:14,boxShadow:T.cardShadow}}>
         <SettingsRow icon="⬇" label="Export transactions as CSV" desc={`${txCount} transactions, ${moCount} months`} onClick={()=>txCount>0?exportCSV(monthlyData):showToast("No data to export")}/>
-        <SettingsRow icon="💾" label="Download full backup (JSON)" desc="All data, settings, history" onClick={()=>{dlBackup(profile,monthlyData,eh,ch,insights,archive);showToast("Backup downloaded");}}/>
+        <SettingsRow icon="💾" label="Download full backup (JSON)" desc="All data, settings, history" onClick={()=>{dlBackup(profile,monthlyData,insights,archive);showToast("Backup downloaded");}}/>
         <SettingsRow icon="↑" label="Restore from backup" desc="Load a previous JSON backup" onClick={()=>restoreFileRef.current.click()}/>
         <SettingsRow icon="🔐" label="Change / Remove PIN" desc="Reset PIN on next open" onClick={()=>{ lsSave("pinHash",null); setPinHash(null); setPinUnlocked(false); setPinSkipped(false); }}/>
       </div>
@@ -1295,12 +1737,18 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       <SettingsGroup title="Profile">
         <SettingsRow icon="👤" label="Identity" desc={`${profile.name||"Anonymous"}${profile.occupation?` · ${profile.occupation}`:""} · ${profile.currency}`} onClick={()=>setYouSection(youSection==="identity"?null:"identity")}/>
         {youSection==="identity"&&IdentitySection()}
+        <SettingsRow icon="🎯" label="Goal" desc={profile.goal?(()=>{const t=profile.goal.type;if(t==="save_more") return "Save more";if(t==="get_out_of_debt") return `Get out of debt${profile.goal.params?.totalDebt?` · ${fmt(profile.goal.params.totalDebt)}`:""}`;if(t==="understand_spending") return "Understand spending";if(t==="spend_less_on") return `Spend less on ${profile.goal.params?.category||"a category"}`;return "Custom";})():"Not set yet"} onClick={()=>setYouSection(youSection==="goal"?null:"goal")}/>
+        {youSection==="goal"&&GoalSection()}
         <SettingsRow icon="💰" label="Income & Bills" desc={`${(profile.incomeStreams||[]).length} sources · ${(profile.fixedCommitments||[]).length} bills`} onClick={()=>setSubScreen("income-bills")}/>
-        <SettingsRow icon="🎯" label="Goals" desc={(profile.goals||[]).length>0?`${(profile.goals||[]).length} active`:"No goals set yet"} onClick={()=>setSubScreen("goals")}/>
+        <SettingsRow icon="🪙" label="Saving goals" desc={(profile.goals||[]).length>0?`${(profile.goals||[]).length} active`:"No goals set yet"} onClick={()=>setSubScreen("goals")}/>
       </SettingsGroup>
 
       <SettingsGroup title="Appearance">
         <SettingsRow icon="🎨" label="Theme" desc={`${LIGHT_PRESETS.concat(DARK_PRESETS).find(p=>p.accent===youAccent&&p.bg===youBg)?.name||"Custom"}`} onClick={()=>setSubScreen("theme")}/>
+      </SettingsGroup>
+
+      <SettingsGroup title="Personalisation">
+        <SettingsRow icon="✨" label="Insights" desc={(()=>{const n=(profile.insightPrefs||[]).length;return n===0?"None enabled":n===1?"1 enabled":`${n} enabled`;})()} onClick={()=>setSubScreen("insights")}/>
       </SettingsGroup>
 
       <SettingsGroup title="Privacy & Data">
@@ -1312,6 +1760,88 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginTop:18,fontSize:10,color:T.textMuted,letterSpacing:0.5}}>
         <PrivacyLock col={T.textMuted}/>v{APP_VERSION} · all data on this device
       </div>
+    </div>;
+  };
+
+  // ── Reusable spending trend chart (cross-month, category-toggleable) ───────
+  const renderSpendingTrendChart=()=>{
+    const data=spendingTrend;
+    const points=data.filter(p=>p.hasData);
+    if(points.length<2) return <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:"22px 18px",textAlign:"center",boxShadow:T.cardShadow}}>
+      <div style={{fontSize:28,marginBottom:8}}>📊</div>
+      <div style={{fontSize:13,fontWeight:600,color:T.textPrimary,marginBottom:4,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>Spending trend</div>
+      <div style={{fontSize:11,color:T.textMuted,lineHeight:1.5}}>Need at least 2 months with transactions to chart your trend.</div>
+    </div>;
+    const W=320, H=130, padX=14, padY=18, padBottom=22;
+    const innerW=W-padX*2, innerH=H-padY-padBottom;
+    const allVals=[...data.map(p=>p.total),...trendCats.flatMap(c=>data.map(p=>p.byCat[c]||0))];
+    const maxV=Math.max(...allVals,1);
+    const xFor=i=>padX+(data.length<=1?innerW/2:(i/(data.length-1))*innerW);
+    const yFor=v=>padY+innerH-(v/maxV)*innerH;
+    const buildPath=(arr,key)=>arr.map((p,i)=>{ const v=key==="total"?p.total:(p.byCat[key]||0); return `${i===0?"M":"L"}${xFor(i).toFixed(1)} ${yFor(v).toFixed(1)}`; }).join(" ");
+    const totalPath=buildPath(data,"total");
+    const sym=CURRENCY_SYMBOLS[profile?.currency||"SGD"];
+    const fmtCompact=v=>{ const a=Math.abs(v); if(a>=1000) return `${sym}${(a/1000).toFixed(a>=10000?0:1)}k`; return `${sym}${a.toFixed(0)}`; };
+    const monthsWithData=points.length;
+    const avgTotal=points.reduce((s,p)=>s+p.total,0)/Math.max(1,monthsWithData);
+
+    const toggleCat=cat=>{
+      setTrendCats(c=>{
+        if(c.includes(cat)) return c.filter(x=>x!==cat);
+        if(c.length>=3) return [c[1],c[2],cat];
+        return [...c,cat];
+      });
+    };
+
+    return <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:"16px 18px 12px",boxShadow:T.cardShadow}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10}}>
+        <div>
+          <MicroLabel style={{marginBottom:2}}>SPENDING TREND</MicroLabel>
+          <div style={{fontSize:11,color:T.textMuted}}>Last {monthsWithData} months</div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontSize:11,color:T.textMuted}}>Avg / month</div>
+          <div style={{fontSize:13,fontFamily:"'DM Mono'",fontWeight:700,color:T.textPrimary}}>{fmtCompact(avgTotal)}</div>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+        <div style={{padding:"4px 10px",borderRadius:14,border:`1px solid ${T.accent}`,background:T.accentSoft,color:T.accent,fontSize:11,fontWeight:700,fontFamily:"'DM Mono'",letterSpacing:0.3}}>Total</div>
+        {trendTopCategories.map(cat=>{
+          const on=trendCats.includes(cat);
+          const col=COLS[cat]||T.accent;
+          return <button key={cat} onClick={()=>toggleCat(cat)} style={{padding:"4px 10px",borderRadius:14,border:`1px solid ${on?col:T.border}`,background:on?col+"22":"transparent",color:on?col:T.textMuted,fontSize:11,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:4}}>
+            <span style={{width:6,height:6,borderRadius:3,background:col,opacity:on?1:0.4}}/>
+            {cat.split(" ").slice(1).join(" ")||cat}
+          </button>;
+        })}
+        {trendCats.length>0&&<button onClick={()=>setTrendCats([])} style={{padding:"4px 10px",borderRadius:14,border:"none",background:"transparent",color:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Clear</button>}
+      </div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{display:"block",overflow:"visible"}}>
+        <path d={totalPath} fill="none" stroke={T.accent} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+        {trendCats.map(cat=>{
+          const col=COLS[cat]||T.accent;
+          return <path key={cat} d={buildPath(data,cat)} fill="none" stroke={col} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.85"/>;
+        })}
+        {data.map((p,i)=>p.hasData?<circle key={i} cx={xFor(i)} cy={yFor(p.total)} r="3" fill={T.surface} stroke={T.accent} strokeWidth="2"/>:null)}
+        {data.map((p,i)=>{
+          const lbl=monthLabelShort(p.month).split(" ")[0];
+          return <text key={`l${i}`} x={xFor(i)} y={H-4} textAnchor="middle" fontSize="9" fill={T.textMuted} fontFamily="DM Mono" fontWeight="500">{lbl}</text>;
+        })}
+      </svg>
+      {trendCats.length>0&&<div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${T.borderSoft}`,display:"flex",flexDirection:"column",gap:4}}>
+        {trendCats.map(cat=>{
+          const col=COLS[cat]||T.accent;
+          const total=data.reduce((s,p)=>s+(p.byCat[cat]||0),0);
+          const avg=total/Math.max(1,monthsWithData);
+          return <div key={cat} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11}}>
+            <span style={{display:"inline-flex",alignItems:"center",gap:6,color:T.textSecondary}}>
+              <span style={{width:10,height:2,background:col,display:"inline-block",borderRadius:1}}/>
+              {cat}
+            </span>
+            <span style={{fontFamily:"'DM Mono'",color:T.textMuted,fontWeight:600}}>{fmtCompact(avg)}/mo</span>
+          </div>;
+        })}
+      </div>}
     </div>;
   };
 
@@ -1336,6 +1866,9 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         <div style={{fontSize:48,fontWeight:700,color:projectedSaved>=0?T.accent:T.negative,letterSpacing:-1.5,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>{fmt(projectedSaved)}</div>
         <div style={{fontSize:13,color:T.textSecondary,marginTop:6}}>by end of {monthLabel(selectedMonth)}{prevSaved!==0?` — ${projectedSaved>=prevSaved?"better":"less"} than last month`:""}</div>
       </div>
+
+      {/* 6-month spending trend (cross-month) */}
+      <div style={{marginBottom:14}}>{renderSpendingTrendChart()}</div>
 
       <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:"16px 18px",marginBottom:14,boxShadow:T.cardShadow}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
@@ -1395,6 +1928,131 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     </div>;
   };
 
+  // ── INSIGHTS settings subscreen ────────────────────────────────────────────
+  const InsightsScreen=()=>{
+    const prefs=new Set(profile?.insightPrefs||[]);
+    const toggle=id=>{
+      const next=new Set(prefs);
+      if(next.has(id)) next.delete(id); else next.add(id);
+      saveProfile({...profile,insightPrefs:[...next]});
+    };
+    return <div style={{padding:"4px 0"}}>
+      <div style={{fontSize:13,color:T.textSecondary,marginBottom:18,lineHeight:1.6}}>Pick the insights you want to see on Home. We'll show up to 2 at a time, rotating across days if you enable more.</div>
+      <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,overflow:"hidden",boxShadow:T.cardShadow,marginBottom:14}}>
+        {insightCatalog.map((ins,i)=>{
+          const on=prefs.has(ins.id);
+          return <div key={ins.id} style={{padding:"14px 16px",borderTop:i?`1px solid ${T.borderSoft}`:"none",display:"flex",alignItems:"center",gap:12,cursor:ins.comingSoon?"default":"pointer",opacity:ins.comingSoon?0.5:1}} onClick={()=>{ if(!ins.comingSoon) toggle(ins.id); }}>
+            <div style={{width:32,height:32,borderRadius:16,background:on?T.accentSoft:T.surface2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{ins.icon}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:600,color:T.textPrimary,display:"flex",alignItems:"center",gap:6}}>
+                {ins.label}
+                {ins.comingSoon&&<span style={{fontSize:9,fontWeight:700,padding:"1px 6px",borderRadius:6,background:T.warning+"20",color:T.warning,fontFamily:"'DM Mono'",letterSpacing:0.4}}>SOON</span>}
+                {!ins.comingSoon&&!ins.ready&&on&&<span style={{fontSize:9,fontWeight:700,padding:"1px 6px",borderRadius:6,background:T.surface2,color:T.textMuted,fontFamily:"'DM Mono'",letterSpacing:0.4}}>NOT YET</span>}
+              </div>
+              <div style={{fontSize:11,color:T.textMuted,marginTop:2,lineHeight:1.4}}>{ins.description}</div>
+            </div>
+            {/* Toggle */}
+            {!ins.comingSoon&&<div style={{width:36,height:22,borderRadius:11,background:on?T.accent:T.borderMid,padding:2,boxSizing:"border-box",transition:"background .15s",flexShrink:0,position:"relative"}}>
+              <div style={{width:18,height:18,borderRadius:9,background:"#fff",transform:`translateX(${on?14:0}px)`,transition:"transform .15s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}/>
+            </div>}
+          </div>;
+        })}
+      </div>
+      <div style={{fontSize:11,color:T.textMuted,textAlign:"center",lineHeight:1.5}}>Insights only show when there's enough data to be meaningful — they'll appear on Home automatically when ready.</div>
+    </div>;
+  };
+
+  // ── INSIGHTS settings subscreen ─ end
+  const SearchScreen=()=>{
+    // Parse query into structured filters
+    const q=(searchQ||"").trim().toLowerCase();
+    const MONTHS=["january","february","march","april","may","june","july","august","september","october","november","december"];
+    const tokens=q.split(/\s+/).filter(Boolean);
+    let amtGt=null, amtLt=null, catFilter=null, monthFilter=null;
+    const textTerms=[];
+    tokens.forEach(tok=>{
+      if(/^>\d/.test(tok)){ const v=parseFloat(tok.slice(1)); if(!isNaN(v)) amtGt=v; }
+      else if(/^<\d/.test(tok)){ const v=parseFloat(tok.slice(1)); if(!isNaN(v)) amtLt=v; }
+      else if(tok.startsWith("category:")){ catFilter=tok.slice(9); }
+      else { const monthIdx=MONTHS.findIndex(m=>m.startsWith(tok)&&tok.length>=3); if(monthIdx>=0) monthFilter=monthIdx+1; else if(/^(0?[1-9]|1[0-2])$/.test(tok)){ monthFilter=parseInt(tok,10); } else textTerms.push(tok); }
+    });
+    // Collect all transactions across all months with their month tag
+    const allTxs=[];
+    Object.entries(monthlyData).forEach(([m,md])=>{(md.txs||[]).forEach(t=>allTxs.push({...t,_month:m}));});
+    // Apply filters
+    const filtered=q?allTxs.filter(t=>{
+      if(amtGt!==null&&Math.abs(t.amount)<=amtGt) return false;
+      if(amtLt!==null&&Math.abs(t.amount)>=amtLt) return false;
+      if(catFilter&&!(t.category||"").toLowerCase().includes(catFilter)) return false;
+      if(monthFilter!==null){
+        const mNum=parseInt(t._month.split("-")[1],10);
+        if(mNum!==monthFilter) return false;
+      }
+      if(textTerms.length>0){
+        const haystack=`${t.description||""} ${t.category||""} ${t.notes||""}`.toLowerCase();
+        if(!textTerms.every(term=>haystack.includes(term))) return false;
+      }
+      return true;
+    }):[];
+    filtered.sort((a,b)=>b.date.localeCompare(a.date));
+    const grand=filtered.reduce((s,t)=>{ const ea=effectiveAmount(t); return s+(ea>0?ea:0); },0);
+
+    return <div>
+      <input type="text" placeholder="Search… try 'grab', '>30', 'march', 'category:food'" value={searchQ} onChange={e=>setSearchQ(e.target.value)} autoFocus style={{width:"100%",padding:"14px 16px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:14,color:T.textPrimary,fontFamily:"inherit",fontSize:14,outline:"none",boxSizing:"border-box",boxShadow:T.cardShadow}}/>
+      {/* Helper chips */}
+      <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:10,marginBottom:14}}>
+        {[">50","<10","category:food","march","grab"].map(ex=><button key={ex} onClick={()=>setSearchQ(searchQ?`${searchQ} ${ex}`:ex)} style={{padding:"4px 10px",borderRadius:14,border:`1px solid ${T.border}`,background:T.surface,color:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"'DM Mono'",fontWeight:500}}>{ex}</button>)}
+        {searchQ&&<button onClick={()=>setSearchQ("")} style={{padding:"4px 10px",borderRadius:14,border:`1px solid ${T.negative}40`,background:"transparent",color:T.negative,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Clear</button>}
+      </div>
+
+      {/* Active filters summary */}
+      {q&&<div style={{padding:"10px 14px",background:T.accentSoft,border:`1px solid ${T.accentBorder}`,borderRadius:12,marginBottom:14,fontSize:12,color:T.textSecondary,lineHeight:1.6}}>
+        <div style={{fontWeight:700,color:T.accent,marginBottom:2,fontSize:11,letterSpacing:0.5,textTransform:"uppercase"}}>{filtered.length} match{filtered.length!==1?"es":""}</div>
+        <div>Total: <span style={{fontFamily:"'DM Mono'",fontWeight:700,color:T.textPrimary}}>{fmt(grand)}</span></div>
+        {amtGt!==null&&<div>· Amount &gt; {fmt(amtGt)}</div>}
+        {amtLt!==null&&<div>· Amount &lt; {fmt(amtLt)}</div>}
+        {catFilter&&<div>· Category contains "{catFilter}"</div>}
+        {monthFilter!==null&&<div>· Month: {MONTHS[monthFilter-1].slice(0,3).toUpperCase()}</div>}
+        {textTerms.length>0&&<div>· Text: {textTerms.join(" + ")}</div>}
+      </div>}
+
+      {/* Results */}
+      {!q&&<div style={{padding:"40px 20px",textAlign:"center"}}>
+        <div style={{fontSize:36,marginBottom:12}}>🔍</div>
+        <div style={{fontSize:14,fontWeight:600,color:T.textPrimary,marginBottom:6,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>Search all your transactions</div>
+        <div style={{fontSize:12,color:T.textMuted,lineHeight:1.6,maxWidth:280,margin:"0 auto"}}>Try a merchant name, amount filter, or category. Combine them: <code style={{fontFamily:"'DM Mono'",fontSize:11,background:T.surface2,padding:"1px 6px",borderRadius:4}}>grab &gt;30 march</code></div>
+      </div>}
+
+      {q&&filtered.length===0&&<div style={{padding:"32px 20px",textAlign:"center"}}>
+        <div style={{fontSize:32,marginBottom:10}}>🤷</div>
+        <div style={{fontSize:13,color:T.textSecondary,lineHeight:1.5}}>No transactions match. Try different terms.</div>
+      </div>}
+
+      {filtered.length>0&&<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:16,overflow:"hidden",boxShadow:T.cardShadow}}>
+        {filtered.slice(0,80).map((t,i)=><div key={t.id+t._month} onClick={()=>{ setSelectedMonth(t._month); setTxDetailId(t.id); setTxDetailMonth(t._month); setSubScreen(null); setTab("money"); }} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 14px",borderTop:i?`1px solid ${T.borderSoft}`:"none",cursor:"pointer"}}>
+          <div style={{width:32,height:32,borderRadius:10,background:(COLS[t.category]||"#868E96")+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{t.category?.split(" ")[0]||"📦"}</div>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:13,fontWeight:500,color:T.textPrimary,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",display:"flex",alignItems:"center",gap:6}}>
+              {t.description}
+              {t.notes&&<span style={{fontSize:10,opacity:0.7}}>📝</span>}
+              {t.split?.with&&<span style={{fontSize:10,opacity:0.7}}>🤝</span>}
+            </div>
+            <div style={{fontSize:10,color:T.textMuted,fontFamily:"'DM Mono'"}}>{t.date} · {monthLabelShort(t._month)}{t.split?.with?` · ${Math.round((t.split.share||0)*100)}% with ${t.split.with}`:""}</div>
+          </div>
+          <div style={{textAlign:"right",flexShrink:0}}>
+            {t.split?.with
+              ?<>
+                <div style={{fontFamily:"'DM Mono'",fontSize:13,fontWeight:600,color:t.amount<0?T.positive:T.textPrimary}}>{t.amount<0?"-":""}{fmt(Math.abs(effectiveAmount(t)))}</div>
+                <div style={{fontFamily:"'DM Mono'",fontSize:10,color:T.textMuted,textDecoration:"line-through"}}>{fmt(Math.abs(t.amount))}</div>
+              </>
+              :<div style={{fontFamily:"'DM Mono'",fontSize:13,fontWeight:600,color:t.amount<0?T.positive:T.textPrimary}}>{t.amount<0?"-":""}{fmt(Math.abs(t.amount))}</div>}
+          </div>
+        </div>)}
+        {filtered.length>80&&<div style={{padding:"12px 14px",fontSize:11,color:T.textMuted,textAlign:"center",borderTop:`1px solid ${T.borderSoft}`}}>Showing 80 of {filtered.length} — refine your search</div>}
+      </div>}
+    </div>;
+  };
+
   const AddChooserScreen=()=>{
     const submitQuick=()=>{
       if(!qaDesc.trim()||!qaAmt||isNaN(+qaAmt)||+qaAmt<=0) return;
@@ -1444,7 +2102,10 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     {/* Header — sticky */}
     <div style={{padding:"12px 0 14px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:T.bg,zIndex:10,marginBottom:4}}>
       <div style={{fontSize:24,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>Money</div>
-      <MonthPicker value={selectedMonth} onChange={setSelectedMonth} startMonth={profile.startMonth}/>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <button onClick={()=>setSubScreen("search")} title="Search transactions" style={{width:36,height:36,borderRadius:18,background:"transparent",border:`1px solid ${T.border}`,color:T.textSecondary,fontSize:16,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"}}>🔍</button>
+        <MonthPicker value={selectedMonth} onChange={setSelectedMonth} startMonth={profile.startMonth}/>
+      </div>
     </div>
 
     {/* Subscriptions — promoted to top of Money for visibility */}
@@ -1533,14 +2194,24 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       {byCat.length>1&&<div style={{padding:"0 14px 10px",display:"flex",gap:6,overflowX:"auto"}}>
         {["All",...byCat.map(([c])=>c)].map(c=><button key={c} onClick={()=>setCatFilter(c)} style={{padding:"6px 12px",borderRadius:16,border:`1px solid ${catFilter===c?T.accent:T.border}`,background:catFilter===c?T.accentSoft:"transparent",color:catFilter===c?T.accent:T.textMuted,fontSize:11,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit",flexShrink:0,fontWeight:catFilter===c?700:500}}>{c==="All"?"All":c.split(" ")[0]}</button>)}
       </div>}
-      {filteredTxs.slice(0,30).map((t,i)=><div key={t.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 18px",borderTop:i?`1px solid ${T.borderSoft}`:`1px solid ${T.borderSoft}`}}>
+      {filteredTxs.slice(0,30).map((t,i)=><div key={t.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 18px",borderTop:`1px solid ${T.borderSoft}`,cursor:"pointer"}} onClick={()=>{setTxDetailId(t.id);setTxDetailMonth(selectedMonth);}}>
         <div style={{width:32,height:32,borderRadius:10,background:(COLS[t.category]||"#868E96")+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{t.category?.split(" ")[0]||"📦"}</div>
         <div style={{flex:1,minWidth:0}}>
-          <div style={{fontSize:13,fontWeight:500,color:T.textPrimary,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.description}</div>
-          <div style={{fontSize:10,color:T.textMuted,fontFamily:"'DM Mono'"}}>{t.date}</div>
+          <div style={{fontSize:13,fontWeight:500,color:T.textPrimary,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",display:"flex",alignItems:"center",gap:6}}>
+            {t.description}
+            {t.notes&&<span title="Has note" style={{fontSize:10,color:T.textMuted,flexShrink:0}}>📝</span>}
+            {t.split?.with&&<span title={`Split with ${t.split.with}`} style={{fontSize:10,flexShrink:0}}>🤝</span>}
+          </div>
+          <div style={{fontSize:10,color:T.textMuted,fontFamily:"'DM Mono'"}}>{t.date}{t.split?.with?` · ${Math.round((t.split.share||0)*100)}% with ${t.split.with}`:""}</div>
         </div>
-        <div style={{fontFamily:"'DM Mono'",fontSize:13,fontWeight:600,color:t.amount<0?T.positive:T.textPrimary}}>{t.amount<0?"-":""}{fmt(Math.abs(t.amount))}</div>
-        <button onClick={()=>archiveTx(t.id)} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:16,padding:"0 4px",lineHeight:1}}>×</button>
+        <div style={{textAlign:"right",flexShrink:0}}>
+          {t.split?.with
+            ?<>
+              <div style={{fontFamily:"'DM Mono'",fontSize:13,fontWeight:600,color:t.amount<0?T.positive:T.textPrimary}}>{t.amount<0?"-":""}{fmt(Math.abs(effectiveAmount(t)))}</div>
+              <div style={{fontFamily:"'DM Mono'",fontSize:10,color:T.textMuted,textDecoration:"line-through"}}>{fmt(Math.abs(t.amount))}</div>
+            </>
+            :<div style={{fontFamily:"'DM Mono'",fontSize:13,fontWeight:600,color:t.amount<0?T.positive:T.textPrimary}}>{t.amount<0?"-":""}{fmt(Math.abs(t.amount))}</div>}
+        </div>
       </div>)}
       {filteredTxs.length>30&&<div style={{padding:"12px 18px",fontSize:11,color:T.textMuted,textAlign:"center"}}>Showing first 30 of {filteredTxs.length}</div>}
     </div>}
@@ -1569,6 +2240,48 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         </div>
       </div>
     </div>
+
+    {/* ── Across all months ── (cross-month section, independent of selectedMonth) */}
+    {spendingTrend.filter(p=>p.hasData).length>=2&&(()=>{
+      const pts=spendingTrend.filter(p=>p.hasData);
+      const last3=pts.slice(-3);
+      const avg3=last3.length>0?last3.reduce((s,p)=>s+p.total,0)/last3.length:0;
+      // Top category across all months (count of months it was top)
+      const monthTops=pts.map(p=>{
+        const entries=Object.entries(p.byCat).sort((a,b)=>b[1]-a[1]);
+        return entries[0]?entries[0][0]:null;
+      }).filter(Boolean);
+      const topCounts={};
+      monthTops.forEach(c=>{topCounts[c]=(topCounts[c]||0)+1;});
+      const topCatEntry=Object.entries(topCounts).sort((a,b)=>b[1]-a[1])[0];
+      const topCat=topCatEntry?topCatEntry[0]:null;
+      const topCatN=topCatEntry?topCatEntry[1]:0;
+      return <div style={{marginBottom:24}}>
+        <div style={{fontSize:11,color:T.textMuted,fontWeight:700,letterSpacing:0.7,textTransform:"uppercase",marginBottom:10,padding:"0 2px"}}>Across all months</div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {renderSpendingTrendChart()}
+          <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:"14px 16px",boxShadow:T.cardShadow,display:"flex",gap:14,alignItems:"center"}}>
+            <div style={{width:36,height:36,borderRadius:18,background:T.accentSoft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>🗓</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:600,color:T.textPrimary,marginBottom:2}}>Recent activity</div>
+              <div style={{fontSize:11,color:T.textSecondary,lineHeight:1.5}}>
+                Averaging <span style={{fontFamily:"'DM Mono'",fontWeight:700,color:T.textPrimary}}>{fmt(avg3)}</span>/month over your last {last3.length} months
+                {topCat&&topCatN>=2&&<>. Top category: <span style={{fontWeight:700}}>{topCat.split(" ").slice(1).join(" ")||topCat}</span> ({topCatN} of {pts.length} months)</>}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>;
+    })()}
+
+    {/* Viewing past month banner */}
+    {selectedMonth!==currentMonth()&&<div onClick={()=>setSelectedMonth(currentMonth())} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"10px 14px",background:T.warning+"15",border:`1px solid ${T.warning}30`,borderRadius:14,marginBottom:18,cursor:"pointer"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
+        <span style={{fontSize:14,flexShrink:0}}>🕘</span>
+        <div style={{fontSize:12,color:T.warning,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Viewing {monthLabel(selectedMonth)} — past month data below</div>
+      </div>
+      <span style={{fontSize:11,color:T.warning,fontWeight:700,whiteSpace:"nowrap",flexShrink:0}}>← Back to current</span>
+    </div>}
 
     {/* HERO */}
     <div style={{marginBottom:26}}>
@@ -1658,6 +2371,93 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       </div>
     </div>}
 
+    {/* Goal emphasis card (different for each goal type) */}
+    {profile.goal&&(()=>{
+      const g=profile.goal;
+      const sym=CURRENCY_SYMBOLS[profile?.currency||"SGD"];
+      // Save more — savings rate progress + monthly target if income known
+      if(g.type==="save_more"){
+        const savRate=incTotal>0?(saved/incTotal*100):null;
+        if(savRate===null) return null;
+        const goalRate=20; // 20% reasonable default goal
+        const onTrack=savRate>=goalRate;
+        const ringPct=Math.max(0,Math.min(1,savRate/Math.max(goalRate,1)));
+        return <div onClick={()=>setSubScreen("insights")} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:"16px 18px",marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer",display:"flex",alignItems:"center",gap:14}}>
+          {/* Ring */}
+          <svg width="64" height="64" viewBox="0 0 64 64" style={{flexShrink:0}}>
+            <circle cx="32" cy="32" r="26" stroke={T.borderSoft} strokeWidth="6" fill="none"/>
+            <circle cx="32" cy="32" r="26" stroke={onTrack?T.accent:T.warning} strokeWidth="6" fill="none" strokeDasharray={`${ringPct*163.36} 163.36`} strokeDashoffset="0" strokeLinecap="round" transform="rotate(-90 32 32)"/>
+            <text x="32" y="36" textAnchor="middle" fontSize="14" fontWeight="700" fill={T.textPrimary} fontFamily="'Bricolage Grotesque','DM Sans',sans-serif">{savRate.toFixed(0)}%</text>
+          </svg>
+          <div style={{flex:1,minWidth:0}}>
+            <MicroLabel style={{marginBottom:4}}>SAVE MORE · GOAL {goalRate}%</MicroLabel>
+            <div style={{fontSize:14,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>{onTrack?"On track":"Below target"}</div>
+            <div style={{fontSize:11,color:T.textSecondary,marginTop:2,lineHeight:1.4}}>{onTrack?`${fmt(saved)} saved · ${(savRate-goalRate).toFixed(0)} points above goal`:`${fmt(saved)} saved · ${fmt(incTotal*goalRate/100-saved)} more to hit goal`}</div>
+          </div>
+        </div>;
+      }
+      // Get out of debt — debt remaining + projected payoff
+      if(g.type==="get_out_of_debt"){
+        const totalDebt=+g.params?.totalDebt||0;
+        if(totalDebt<=0) return null;
+        // Use last 3 months avg saved as monthly payoff capacity
+        const recent=monthlySavings.filter(m=>m.hasData&&!m.isCurrent).slice(-3);
+        const avgNet=recent.length>0?recent.reduce((s,m)=>s+m.saved,0)/recent.length:0;
+        const monthsLeft=avgNet>0?Math.ceil(totalDebt/avgNet):null;
+        const payoffDate=monthsLeft?new Date(new Date().setMonth(new Date().getMonth()+monthsLeft)):null;
+        return <div onClick={()=>setSubScreen("insights")} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:"16px 18px",marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer"}}>
+          <MicroLabel style={{marginBottom:6}}>DEBT-FREE PLAN</MicroLabel>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
+            <div style={{fontSize:24,fontWeight:800,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif",letterSpacing:-0.8}}>{fmt(totalDebt)}</div>
+            <div style={{fontSize:11,color:T.textMuted}}>remaining</div>
+          </div>
+          {monthsLeft?<div style={{fontSize:12,color:T.textSecondary,lineHeight:1.5}}>At your recent pace ({fmt(avgNet)}/mo net), you'd be debt-free by <span style={{fontWeight:700,color:T.accent}}>{payoffDate.toLocaleDateString("en-SG",{month:"short",year:"numeric"})}</span> ({monthsLeft} month{monthsLeft!==1?"s":""}).</div>
+            :<div style={{fontSize:12,color:T.textMuted,lineHeight:1.5}}>Save more each month to project a payoff date.</div>}
+        </div>;
+      }
+      // Understand spending — surface most active insight
+      if(g.type==="understand_spending"){
+        // Pick the most "interesting" ready insight that isn't already on the visible list
+        const candidates=insightCatalog.filter(i=>i.ready&&i.renderHome&&(i.id==="category_vs_usual"||i.id==="highest_category"));
+        if(candidates.length===0) return null;
+        const ins=candidates[0];
+        return <div onClick={()=>setSubScreen("insights")} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer"}}>
+          <div style={{padding:"10px 14px 0",fontSize:11,color:T.textMuted,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4}}>WORTH NOTING</div>
+          {ins.renderHome({T,fmt})}
+        </div>;
+      }
+      // Spend less on a category — daily-budget-remaining
+      if(g.type==="spend_less_on"){
+        const cat=g.params?.category;
+        const cap=+g.params?.cap||0;
+        if(!cat) return null;
+        const catSpent=Math.abs((txs||[]).filter(t=>t.category===cat&&t.amount>0).reduce((s,t)=>s+effectiveAmount(t),0));
+        const today=new Date(); const dayOfM=today.getDate(); const dim=new Date(today.getFullYear(),today.getMonth()+1,0).getDate();
+        const daysLeft=Math.max(0,dim-dayOfM);
+        const remaining=cap>0?Math.max(0,cap-catSpent):null;
+        const dailyAllowed=remaining&&daysLeft>0?remaining/daysLeft:null;
+        const pct=cap>0?Math.min(1,catSpent/cap):0;
+        const over=cap>0&&catSpent>cap;
+        return <div onClick={()=>setSubScreen("insights")} style={{background:T.surface,border:`1px solid ${over?T.negative+"40":T.border}`,borderRadius:18,padding:"14px 16px",marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
+            <MicroLabel>SPEND LESS ON {cat.split(" ").slice(1).join(" ").toUpperCase()||cat}</MicroLabel>
+            <span style={{fontFamily:"'DM Mono'",fontSize:11,color:T.textMuted}}>{daysLeft} days left</span>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
+            <span style={{fontSize:20,fontWeight:800,color:over?T.negative:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif",letterSpacing:-0.6}}>{fmt(catSpent)}</span>
+            {cap>0&&<span style={{fontSize:12,color:T.textMuted}}>of {fmt(cap)}</span>}
+          </div>
+          {cap>0&&<div style={{height:5,background:T.borderSoft,borderRadius:4,overflow:"hidden",marginBottom:8}}>
+            <div style={{height:"100%",width:`${pct*100}%`,background:over?T.negative:pct>0.8?T.warning:T.accent,borderRadius:4,transition:"width .3s"}}/>
+          </div>}
+          {dailyAllowed!==null&&!over&&<div style={{fontSize:11,color:T.textSecondary}}>{fmt(dailyAllowed)}/day for the rest of the month keeps you under.</div>}
+          {over&&<div style={{fontSize:11,color:T.negative,fontWeight:600}}>Over by {fmt(catSpent-cap)} this month.</div>}
+          {!cap&&<div style={{fontSize:11,color:T.textMuted}}>Set a monthly cap in You → Goal to track this.</div>}
+        </div>;
+      }
+      return null;
+    })()}
+
     {/* 6-MONTH TREND — line chart */}
     {monthlySavings.filter(m=>m.hasData).length>=2&&(()=>{
       const points=monthlySavings;
@@ -1738,6 +2538,13 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         </div>
         <span style={{fontSize:14,color:T.textMuted}}>›</span>
       </div>
+    </div>}
+
+    {/* Active insights (curated by user) */}
+    {visibleInsights.length>0&&<div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:12}}>
+      {visibleInsights.map(ins=><div key={ins.id} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:16,boxShadow:T.cardShadow,cursor:"pointer"}} onClick={()=>setSubScreen("insights")}>
+        {ins.renderHome({T,fmt})}
+      </div>)}
     </div>}
 
     {/* Subscriptions insight — promoted to Home */}
@@ -1899,16 +2706,46 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
               <div style={{position:"absolute",inset:0,background:T.accent,borderRadius:3,animation:uploadStep<4?"pulsebar 1.4s ease-in-out infinite":"none",width:uploadStep===4?"100%":"60%"}}/>
             </div>
           </div>}
-          <MicroLabel style={{marginBottom:10}}>{uploadStep===4?"All done — opening review":uploadStep===3?"Organising transactions":uploadStep===2?"Claude is reading":"Reading file"}</MicroLabel>
-          {STEPS.map(s=>{
-            const done=uploadStep>s.id; const active=uploadStep===s.id;
-            return <div key={s.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderBottom:`1px solid ${T.borderSoft}`}}>
-              <span style={{fontSize:14,width:20,display:"flex",justifyContent:"center"}}>{done?"✅":active?<span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>⏳</span>:"⏳"}</span>
-              <span style={{fontSize:13,color:done?T.textMuted:active?T.textPrimary:T.textMuted,fontWeight:active?600:400,opacity:uploadStep<s.id?0.5:1}}>{s.label}</span>
-            </div>;
-          })}
+          {uploadStep===4&&uploadInsight.topCat
+            ?<div style={{padding:"6px 0 4px"}}>
+              <MicroLabel style={{marginBottom:14,color:T.accent}}>HERE'S WHAT WE FOUND</MicroLabel>
+              <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:14}}>
+                <div style={{padding:"12px 14px",background:T.accentSoft,border:`1px solid ${T.accentBorder}`,borderRadius:12,display:"flex",alignItems:"center",gap:12,animation:"slideIn 0.4s ease-out 0s both"}}>
+                  <div style={{fontSize:22}}>🧾</div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:11,color:T.textMuted,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4}}>FOUND</div>
+                    <div style={{fontSize:15,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>{uploadTxCount} transactions{uploadInsight.monthsCovered>1?` across ${uploadInsight.monthsCovered} months`:""}</div>
+                  </div>
+                </div>
+                <div style={{padding:"12px 14px",background:T.accentSoft,border:`1px solid ${T.accentBorder}`,borderRadius:12,display:"flex",alignItems:"center",gap:12,animation:"slideIn 0.4s ease-out 0.45s both"}}>
+                  <div style={{fontSize:22}}>{uploadInsight.topCat?.split(" ")[0]||"📊"}</div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:11,color:T.textMuted,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4}}>TOP CATEGORY</div>
+                    <div style={{fontSize:15,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>{uploadInsight.topCat?.split(" ").slice(1).join(" ")||uploadInsight.topCat}</div>
+                  </div>
+                </div>
+                <div style={{padding:"12px 14px",background:T.accentSoft,border:`1px solid ${T.accentBorder}`,borderRadius:12,display:"flex",alignItems:"center",gap:12,animation:"slideIn 0.4s ease-out 0.9s both"}}>
+                  <div style={{fontSize:22}}>💸</div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:11,color:T.textMuted,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4}}>TOTAL SPENT</div>
+                    <div style={{fontSize:15,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>{fmt(uploadInsight.totalSpent)}</div>
+                  </div>
+                </div>
+              </div>
+              <div style={{textAlign:"center",fontSize:11,color:T.textMuted,fontStyle:"italic",animation:"fadeIn 0.4s ease-out 1.3s both"}}>Opening review…</div>
+            </div>
+            :<>
+              <MicroLabel style={{marginBottom:10}}>{uploadStep===3?"Organising transactions":uploadStep===2?"Claude is reading":"Reading file"}</MicroLabel>
+              {STEPS.map(s=>{
+                const done=uploadStep>s.id; const active=uploadStep===s.id;
+                return <div key={s.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderBottom:`1px solid ${T.borderSoft}`}}>
+                  <span style={{fontSize:14,width:20,display:"flex",justifyContent:"center"}}>{done?"✅":active?<span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>⏳</span>:"⏳"}</span>
+                  <span style={{fontSize:13,color:done?T.textMuted:active?T.textPrimary:T.textMuted,fontWeight:active?600:400,opacity:uploadStep<s.id?0.5:1}}>{s.label}</span>
+                </div>;
+              })}
+            </>}
           {uploadMsg&&uploadMsg.startsWith("⚠")&&<div style={{marginTop:14,fontSize:12,color:T.negative}}>{uploadMsg}</div>}
-          <style>{`@keyframes pulsebar{0%,100%{opacity:.4}50%{opacity:1}}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+          <style>{`@keyframes pulsebar{0%,100%{opacity:.4}50%{opacity:1}}@keyframes spin{to{transform:rotate(360deg)}}@keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}@keyframes fadeIn{from{opacity:0}to{opacity:1}}`}</style>
         </div>}
 
       <input ref={fileRef} type="file" accept=".pdf,.csv,application/pdf,text/csv" style={{display:"none"}} onChange={handleFile}/>
@@ -1960,15 +2797,37 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
   };
 
   // ── Render ──────────────────────────────────────────────────────────────────
+  const exitPreview=()=>{
+    // Clear the sample data and return to a real (empty) dashboard
+    lsSave("monthlyData",{});
+    setMonthlyData({});
+    setPreviewMode(false);
+    setSelectedMonth(currentMonth());
+    setSubScreen(null);
+    setTab("home");
+    setTxDetailId(null);
+    showToast("Preview cleared — your real dashboard awaits");
+  };
+
   return <ThemeCtx.Provider value={theme}>
     <div style={{minHeight:"100vh",background:T.bg,color:T.textPrimary,fontFamily:"'DM Sans','Helvetica Neue',sans-serif"}}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500;600&family=Bricolage+Grotesque:wght@600;700;800&display=swap" rel="stylesheet"/>
+
+      {/* Preview banner — sticky at top, clear sample-data signal */}
+      {previewMode&&<div style={{position:"sticky",top:0,zIndex:150,background:T.warning,color:"#fff",padding:"10px 14px",display:"flex",alignItems:"center",gap:10,boxShadow:"0 2px 12px rgba(0,0,0,0.18)"}}>
+        <div style={{fontSize:18,flexShrink:0}}>👁</div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:12,fontWeight:700,lineHeight:1.2}}>Preview — this is sample data</div>
+          <div style={{fontSize:10,opacity:0.9,marginTop:1}}>Tap around to explore. Then tap the button →</div>
+        </div>
+        <button onClick={exitPreview} style={{background:"#fff",color:T.warning,border:"none",borderRadius:14,padding:"6px 12px",fontFamily:"inherit",fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>Take me to my real dashboard</button>
+      </div>}
 
       {/* Global overlays */}
       {toast&&<Toast msg={toast} onDone={()=>setToast("")}/>}
       {showPrivacy&&<PrivacyModal onClose={()=>setShowPrivacy(false)}/>}
       {restoreCandidate&&<RestoreModal backup={restoreCandidate} onConfirm={()=>doRestore(restoreCandidate)} onClose={()=>setRestoreCandidate(null)}/>}
-      {showReset&&<ResetModal onConfirm={doReset} onClose={()=>setShowReset(false)} onDownloadFirst={()=>{dlBackup(profile,monthlyData,eh,ch,insights,archive);showToast("Backup downloaded");}}/>}
+      {showReset&&<ResetModal onConfirm={doReset} onClose={()=>setShowReset(false)} onDownloadFirst={()=>{dlBackup(profile,monthlyData,insights,archive);showToast("Backup downloaded");}}/>}
 
       {/* Sub-screen overlays */}
       {subScreen&&<div style={{position:"fixed",inset:0,background:T.bg,zIndex:200,overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
@@ -1976,7 +2835,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           <div style={{display:"flex",alignItems:"center",gap:8,padding:"12px 0 18px"}}>
             <button onClick={()=>{setSubScreen(null);setAddMode("choose");setIbDraft(null);setGoalsDraft(null);}} style={{background:"none",border:"none",fontSize:24,color:T.textSecondary,cursor:"pointer",padding:"4px 8px",fontFamily:"inherit"}}>‹</button>
             <div style={{fontSize:18,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>
-              {subScreen==="add"?"Add":subScreen==="upload"?"Upload statement":subScreen==="review"?"Quick review":subScreen==="forecast"?"Forecast":subScreen==="subscriptions"?"Subscriptions":subScreen==="income-bills"?"Income & Bills":subScreen==="goals"?"Goals":subScreen==="theme"?"Theme":subScreen==="advanced"?"Advanced":""}
+              {subScreen==="add"?"Add":subScreen==="upload"?"Upload statement":subScreen==="review"?"Quick review":subScreen==="forecast"?"Forecast":subScreen==="subscriptions"?"Subscriptions":subScreen==="income-bills"?"Income & Bills":subScreen==="goals"?"Goals":subScreen==="theme"?"Theme":subScreen==="advanced"?"Advanced":subScreen==="search"?"Search":subScreen==="insights"?"Insights":""}
             </div>
           </div>
           {subScreen==="add"&&AddChooserScreen()}
@@ -1988,8 +2847,20 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           {subScreen==="goals"&&GoalsSection()}
           {subScreen==="theme"&&ThemeSection()}
           {subScreen==="advanced"&&AdvancedSection()}
+          {subScreen==="search"&&SearchScreen()}
+          {subScreen==="insights"&&InsightsScreen()}
         </div>
       </div>}
+
+      {/* Transaction detail modal */}
+      {txDetailId&&(()=>{
+        const found=findTx(txDetailId);
+        if(!found) return null;
+        // Build autocomplete suggestions from past split-with names
+        const sugg=new Set();
+        Object.values(monthlyData).forEach(md=>(md.txs||[]).forEach(t=>{ if(t.split?.with) sugg.add(t.split.with); }));
+        return <TxDetailModal tx={found.tx} month={found.month} monthLabel={monthLabel} allCats={[...CATS,...FIXED_CATS]} fmt={fmt} onSave={d=>editTx(d,found.month)} onArchive={(id,m)=>archiveTx(id,m)} onClose={()=>{setTxDetailId(null);setTxDetailMonth(null);}} splitSuggestions={[...sugg]}/>;
+      })()}
 
       {/* Bills/Recurring detection modals */}
       {fixedCommitDetected&&<FixedCommitModal detected={fixedCommitDetected} fmt={fmt} onConfirm={handleFixedCommitConfirm} onSkip={()=>{
