@@ -659,8 +659,10 @@ export default function App(){
   // Goal editor (You-tab) draft state
   const [goalTypeDraft,setGoalTypeDraft]=useState(null);
   const [goalParamsDraft,setGoalParamsDraft]=useState(null);
-  // Spending trend chart — selected categories overlay (max 3)
+  // Spending trend chart — selected categories overlay
   const [trendCats,setTrendCats]=useState([]);
+  // Money tab transactions pagination
+  const [txPage,setTxPage]=useState(1);
   // VarIncomeRow drafts and flash state — keyed by stream id
   const [varDrafts,setVarDrafts]=useState({});
   const [varFlash,setVarFlash]=useState({});
@@ -694,6 +696,7 @@ export default function App(){
     try{ localStorage.removeItem("excludeHistory"); localStorage.removeItem("catExcludeHistory"); }catch(e){}
   },[]);
   useEffect(()=>{ if(profile?.startMonth&&selectedMonth<profile.startMonth) setSelectedMonth(profile.startMonth); },[profile?.startMonth]);
+  useEffect(()=>{ setTxPage(1); },[selectedMonth,catFilter]);
   useEffect(()=>{
     if(!profile?.onboarded) return;
     clearTimeout(backupTimer.current);
@@ -764,11 +767,11 @@ export default function App(){
     return out;
   },[monthlyData,profile?.startMonth]);
 
-  // Top categories across the trend window (for chip options)
-  const trendTopCategories=useMemo(()=>{
+  // All categories that have ever had spending in the trend window, sorted by total desc
+  const trendAllCategories=useMemo(()=>{
     const agg={};
     spendingTrend.forEach(p=>{ Object.entries(p.byCat).forEach(([cat,amt])=>{ agg[cat]=(agg[cat]||0)+amt; }); });
-    return Object.entries(agg).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([cat])=>cat);
+    return Object.entries(agg).sort((a,b)=>b[1]-a[1]).map(([cat])=>cat);
   },[spendingTrend]);
 
   const detectedSubscriptions=useMemo(()=>{
@@ -1763,7 +1766,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     </div>;
   };
 
-  // ── Reusable spending trend chart (cross-month, category-toggleable) ───────
+  // ── Reusable spending trend chart (cross-month, all categories togglable) ───
   const renderSpendingTrendChart=()=>{
     const data=spendingTrend;
     const points=data.filter(p=>p.hasData);
@@ -1784,14 +1787,15 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     const fmtCompact=v=>{ const a=Math.abs(v); if(a>=1000) return `${sym}${(a/1000).toFixed(a>=10000?0:1)}k`; return `${sym}${a.toFixed(0)}`; };
     const monthsWithData=points.length;
     const avgTotal=points.reduce((s,p)=>s+p.total,0)/Math.max(1,monthsWithData);
+    // Adaptive stroke: thinner when many categories active
+    const catStroke=trendCats.length<=3?1.6:trendCats.length<=6?1.2:1;
 
     const toggleCat=cat=>{
-      setTrendCats(c=>{
-        if(c.includes(cat)) return c.filter(x=>x!==cat);
-        if(c.length>=3) return [c[1],c[2],cat];
-        return [...c,cat];
-      });
+      setTrendCats(c=>c.includes(cat)?c.filter(x=>x!==cat):[...c,cat]);
     };
+    const selectAll=()=>setTrendCats([...trendAllCategories]);
+    const clearAll=()=>setTrendCats([]);
+    const allOn=trendCats.length===trendAllCategories.length&&trendAllCategories.length>0;
 
     return <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:"16px 18px 12px",boxShadow:T.cardShadow}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10}}>
@@ -1804,9 +1808,10 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           <div style={{fontSize:13,fontFamily:"'DM Mono'",fontWeight:700,color:T.textPrimary}}>{fmtCompact(avgTotal)}</div>
         </div>
       </div>
-      <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+      {/* Category chips — all categories, with Select all / Clear helpers */}
+      <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
         <div style={{padding:"4px 10px",borderRadius:14,border:`1px solid ${T.accent}`,background:T.accentSoft,color:T.accent,fontSize:11,fontWeight:700,fontFamily:"'DM Mono'",letterSpacing:0.3}}>Total</div>
-        {trendTopCategories.map(cat=>{
+        {trendAllCategories.map(cat=>{
           const on=trendCats.includes(cat);
           const col=COLS[cat]||T.accent;
           return <button key={cat} onClick={()=>toggleCat(cat)} style={{padding:"4px 10px",borderRadius:14,border:`1px solid ${on?col:T.border}`,background:on?col+"22":"transparent",color:on?col:T.textMuted,fontSize:11,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:4}}>
@@ -1814,13 +1819,15 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
             {cat.split(" ").slice(1).join(" ")||cat}
           </button>;
         })}
-        {trendCats.length>0&&<button onClick={()=>setTrendCats([])} style={{padding:"4px 10px",borderRadius:14,border:"none",background:"transparent",color:T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Clear</button>}
+        {trendAllCategories.length>1&&<>
+          <button onClick={allOn?clearAll:selectAll} style={{padding:"4px 10px",borderRadius:14,border:`1px dashed ${T.borderMid}`,background:"transparent",color:T.textSecondary,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",marginLeft:"auto"}}>{allOn?"Clear all":"Select all"}</button>
+        </>}
       </div>
       <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{display:"block",overflow:"visible"}}>
         <path d={totalPath} fill="none" stroke={T.accent} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
         {trendCats.map(cat=>{
           const col=COLS[cat]||T.accent;
-          return <path key={cat} d={buildPath(data,cat)} fill="none" stroke={col} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.85"/>;
+          return <path key={cat} d={buildPath(data,cat)} fill="none" stroke={col} strokeWidth={catStroke} strokeLinecap="round" strokeLinejoin="round" opacity="0.85"/>;
         })}
         {data.map((p,i)=>p.hasData?<circle key={i} cx={xFor(i)} cy={yFor(p.total)} r="3" fill={T.surface} stroke={T.accent} strokeWidth="2"/>:null)}
         {data.map((p,i)=>{
@@ -1828,7 +1835,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           return <text key={`l${i}`} x={xFor(i)} y={H-4} textAnchor="middle" fontSize="9" fill={T.textMuted} fontFamily="DM Mono" fontWeight="500">{lbl}</text>;
         })}
       </svg>
-      {trendCats.length>0&&<div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${T.borderSoft}`,display:"flex",flexDirection:"column",gap:4}}>
+      {trendCats.length>0&&trendCats.length<=6&&<div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${T.borderSoft}`,display:"flex",flexDirection:"column",gap:4}}>
         {trendCats.map(cat=>{
           const col=COLS[cat]||T.accent;
           const total=data.reduce((s,p)=>s+(p.byCat[cat]||0),0);
@@ -1842,89 +1849,209 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           </div>;
         })}
       </div>}
+      {trendCats.length>6&&<div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${T.borderSoft}`,fontSize:11,color:T.textMuted,textAlign:"center"}}>{trendCats.length} categories shown — clear some for per-line averages</div>}
     </div>;
   };
 
   // ── FORECAST detail screen ───────────────────────────────────────────────
   const ForecastScreen=()=>{
-    if(!isCurMonth||incTotal===0||dayOfMonth<=5){
+    const isFutureMonth=selectedMonth>currentMonth();
+    const isPastMonth=selectedMonth<currentMonth();
+    // Future-month early exit (nothing useful to show)
+    if(isFutureMonth){
       return <div style={{padding:"24px 18px",textAlign:"center"}}>
-        <div style={{fontSize:32,marginBottom:14}}>📈</div>
-        <div style={{fontSize:18,fontWeight:700,color:T.textPrimary,marginBottom:8,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>Forecast not ready yet</div>
-        <div style={{fontSize:13,color:T.textSecondary,maxWidth:300,margin:"0 auto",lineHeight:1.6}}>{!isCurMonth?"Forecast only works for the current month. Select this month to see projections.":incTotal===0?"Set up your income in You first.":"Add at least 5 days of transactions to get a useful projection."}</div>
+        <div style={{fontSize:32,marginBottom:14}}>📅</div>
+        <div style={{fontSize:18,fontWeight:700,color:T.textPrimary,marginBottom:8,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>Hasn't happened yet</div>
+        <div style={{fontSize:13,color:T.textSecondary,maxWidth:300,margin:"0 auto",lineHeight:1.6}}>This is a future month. Switch to <span onClick={()=>setSelectedMonth(currentMonth())} style={{color:T.accent,fontWeight:700,cursor:"pointer"}}>this month</span> or a past one to see daily activity.</div>
       </div>;
     }
-    const dailyAvg=varTotal/dayOfMonth;
-    const remainingDays=daysInMonth-dayOfMonth;
-    const chartH=120; const chartW=300;
-    const dailyBudget=incTotal-fixedTotal>0?(incTotal-fixedTotal)/daysInMonth:0;
-    const projByCat=byCat.slice(0,4).map(([cat,amt])=>({cat,actual:Math.abs(amt),projected:Math.abs(amt)*(daysInMonth/dayOfMonth)}));
+    // No income setup at all
+    if(incTotal===0&&txs.length===0){
+      return <div style={{padding:"24px 18px",textAlign:"center"}}>
+        <div style={{fontSize:32,marginBottom:14}}>📈</div>
+        <div style={{fontSize:18,fontWeight:700,color:T.textPrimary,marginBottom:8,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>Nothing to show yet</div>
+        <div style={{fontSize:13,color:T.textSecondary,maxWidth:300,margin:"0 auto",lineHeight:1.6}}>Add transactions or set up income in <span onClick={()=>{setTab("you");setSubScreen(null);}} style={{color:T.accent,fontWeight:700,cursor:"pointer"}}>You</span> to see daily activity.</div>
+      </div>;
+    }
+
+    // Build per-day series for the selected month
+    // For past months: every day of the month (data complete)
+    // For current month: days 1..today have actuals; future days are null (skipped)
+    const [yr,mo]=selectedMonth.split("-").map(Number);
+    const monthDIM=new Date(yr,mo,0).getDate(); // days in selectedMonth
+    const today=new Date();
+    const isCurMonthLocal=currentMonth()===selectedMonth;
+    const lastDataDay=isCurMonthLocal?Math.min(monthDIM,today.getDate()):monthDIM;
+    // Bucket transactions by day
+    const byDayTotal=new Array(monthDIM+1).fill(0); // 1..monthDIM
+    const byDayCat={}; // {cat: [0, day1, day2, ...]}
+    txs.forEach(t=>{
+      if(t.amount<=0) return; // debits only (credits are income-like)
+      const d=new Date(t.date);
+      const day=d.getDate();
+      if(day<1||day>monthDIM) return;
+      const ea=effectiveAmount(t);
+      byDayTotal[day]+=ea;
+      if(!byDayCat[t.category]) byDayCat[t.category]=new Array(monthDIM+1).fill(0);
+      byDayCat[t.category][day]+=ea;
+    });
+
+    // Chart geometry
+    const chartW=320, chartH=130, padX=14, padY=14, padBottom=22;
+    const innerW=chartW-padX*2, innerH=chartH-padY-padBottom;
+    const allDailyVals=[];
+    for(let d=1;d<=lastDataDay;d++){ allDailyVals.push(byDayTotal[d]); }
+    trendCats.forEach(c=>{ if(byDayCat[c]){ for(let d=1;d<=lastDataDay;d++) allDailyVals.push(byDayCat[c][d]); } });
+    const maxV=Math.max(...allDailyVals,1);
+    const xFor=d=>padX+((d-1)/(monthDIM-1))*innerW;
+    const yFor=v=>padY+innerH-(v/maxV)*innerH;
+    const buildDailyPath=(arr,limit)=>{
+      const pts=[];
+      for(let d=1;d<=limit;d++) pts.push(`${d===1?"M":"L"}${xFor(d).toFixed(1)} ${yFor(arr[d]||0).toFixed(1)}`);
+      return pts.join(" ");
+    };
+    const totalPath=buildDailyPath(byDayTotal,lastDataDay);
+    const sym2=CURRENCY_SYMBOLS[profile?.currency||"SGD"];
+    const fmtCompact2=v=>{ const a=Math.abs(v); if(a>=1000) return `${sym2}${(a/1000).toFixed(a>=10000?0:1)}k`; return `${sym2}${a.toFixed(0)}`; };
+
+    const dailyCatsAvail=Object.keys(byDayCat).sort((a,b)=>{
+      const sa=byDayCat[a].reduce((s,v)=>s+v,0), sb=byDayCat[b].reduce((s,v)=>s+v,0);
+      return sb-sa;
+    });
+
+    const toggleCat=cat=>setTrendCats(c=>c.includes(cat)?c.filter(x=>x!==cat):[...c,cat]);
+    const allOn=trendCats.length===dailyCatsAvail.length&&dailyCatsAvail.length>0;
+    const catStroke=trendCats.length<=3?1.6:trendCats.length<=6?1.2:1;
+
+    // Daily average for context
+    const dailyAvg=lastDataDay>0?varTotal/lastDataDay:0;
+    const peakDay=(()=>{let best=0,bestD=0;for(let d=1;d<=lastDataDay;d++) if(byDayTotal[d]>best){best=byDayTotal[d];bestD=d;}return {amt:best,day:bestD};})();
+    const zeroDays=(()=>{let n=0;for(let d=1;d<=lastDataDay;d++) if(byDayTotal[d]===0) n++; return n;})();
 
     return <div>
+      {/* Hero — past = actual, current = projection */}
       <div style={{textAlign:"center",marginBottom:22}}>
-        <MicroLabel style={{marginBottom:8}}>YOU'LL LIKELY SAVE</MicroLabel>
-        <div style={{fontSize:48,fontWeight:700,color:projectedSaved>=0?T.accent:T.negative,letterSpacing:-1.5,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>{fmt(projectedSaved)}</div>
-        <div style={{fontSize:13,color:T.textSecondary,marginTop:6}}>by end of {monthLabel(selectedMonth)}{prevSaved!==0?` — ${projectedSaved>=prevSaved?"better":"less"} than last month`:""}</div>
+        {isPastMonth
+          ?<>
+            <MicroLabel style={{marginBottom:8}}>YOU SAVED</MicroLabel>
+            <div style={{fontSize:48,fontWeight:700,color:saved>=0?T.accent:T.negative,letterSpacing:-1.5,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>{fmt(saved)}</div>
+            <div style={{fontSize:13,color:T.textSecondary,marginTop:6}}>in {monthLabel(selectedMonth)}{prevSaved!==0&&prevSaved!==saved?` — ${saved>=prevSaved?"better":"less"} than the month before`:""}</div>
+          </>
+          :dayOfMonth>5&&incTotal>0?<>
+            <MicroLabel style={{marginBottom:8}}>YOU'LL LIKELY SAVE</MicroLabel>
+            <div style={{fontSize:48,fontWeight:700,color:projectedSaved>=0?T.accent:T.negative,letterSpacing:-1.5,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>{fmt(projectedSaved)}</div>
+            <div style={{fontSize:13,color:T.textSecondary,marginTop:6}}>by end of {monthLabel(selectedMonth)}{prevSaved!==0?` — ${projectedSaved>=prevSaved?"better":"less"} than last month`:""}</div>
+          </>:<>
+            <MicroLabel style={{marginBottom:8}}>SO FAR THIS MONTH</MicroLabel>
+            <div style={{fontSize:48,fontWeight:700,color:saved>=0?T.accent:T.negative,letterSpacing:-1.5,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>{fmt(saved)}</div>
+            <div style={{fontSize:13,color:T.textSecondary,marginTop:6}}>day {dayOfMonth} of {daysInMonth}{incTotal===0?" · add income to see projection":" · projection ready from day 6"}</div>
+          </>}
       </div>
 
       {/* 6-month spending trend (cross-month) */}
       <div style={{marginBottom:14}}>{renderSpendingTrendChart()}</div>
 
-      <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:"16px 18px",marginBottom:14,boxShadow:T.cardShadow}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-          <div style={{fontSize:13,fontWeight:700,color:T.textPrimary}}>Spending pace</div>
-          <div style={{fontSize:11,color:T.textMuted}}>Day {dayOfMonth} of {daysInMonth}</div>
+      {/* Daily spending chart for selected month */}
+      {txs.filter(t=>t.amount>0).length>=1?<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:"16px 18px",marginBottom:14,boxShadow:T.cardShadow}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10}}>
+          <div>
+            <MicroLabel style={{marginBottom:2}}>DAILY SPENDING</MicroLabel>
+            <div style={{fontSize:11,color:T.textMuted}}>{monthLabel(selectedMonth)}{isCurMonthLocal?` · day ${dayOfMonth} of ${daysInMonth}`:""}</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:11,color:T.textMuted}}>Avg / day</div>
+            <div style={{fontSize:13,fontFamily:"'DM Mono'",fontWeight:700,color:T.textPrimary}}>{fmtCompact2(dailyAvg)}</div>
+          </div>
         </div>
-        <svg width="100%" height={chartH+30} viewBox={`0 0 ${chartW} ${chartH+30}`} preserveAspectRatio="none">
-          {dailyBudget>0&&(()=>{const maxV=Math.max(varTotal,projected,dailyBudget*daysInMonth,1);const y=chartH-(dailyBudget*daysInMonth/maxV)*(chartH-10);return <line x1="0" y1={y} x2={chartW} y2={y} stroke={T.warning} strokeWidth="1.5" strokeDasharray="3,3"/>;})()}
-          {(()=>{
-            const maxV=Math.max(varTotal,projected,dailyBudget*daysInMonth,1);
-            const todayX=(dayOfMonth/daysInMonth)*chartW;
-            const todayY=chartH-(varTotal/maxV)*(chartH-10);
-            const projY=chartH-(projected/maxV)*(chartH-10);
-            return <>
-              <line x1="0" y1={chartH} x2={todayX} y2={todayY} stroke={T.accent} strokeWidth="2.5" strokeLinecap="round"/>
-              <line x1={todayX} y1={todayY} x2={chartW} y2={projY} stroke={T.accent} strokeWidth="2" strokeDasharray="4,4" strokeLinecap="round" opacity="0.5"/>
-              <circle cx={todayX} cy={todayY} r="4" fill={T.accent}/>
-            </>;
-          })()}
-          <text x="2" y={chartH+18} fill={T.textMuted} fontSize="9" fontFamily="DM Mono">Day 1</text>
-          <text x={chartW-32} y={chartH+18} fill={T.textMuted} fontSize="9" fontFamily="DM Mono" textAnchor="start">Day {daysInMonth}</text>
+        {/* Category chips */}
+        {dailyCatsAvail.length>0&&<div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
+          <div style={{padding:"4px 10px",borderRadius:14,border:`1px solid ${T.accent}`,background:T.accentSoft,color:T.accent,fontSize:11,fontWeight:700,fontFamily:"'DM Mono'",letterSpacing:0.3}}>Total</div>
+          {dailyCatsAvail.map(cat=>{
+            const on=trendCats.includes(cat);
+            const col=COLS[cat]||T.accent;
+            return <button key={cat} onClick={()=>toggleCat(cat)} style={{padding:"4px 10px",borderRadius:14,border:`1px solid ${on?col:T.border}`,background:on?col+"22":"transparent",color:on?col:T.textMuted,fontSize:11,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:4}}>
+              <span style={{width:6,height:6,borderRadius:3,background:col,opacity:on?1:0.4}}/>
+              {cat.split(" ").slice(1).join(" ")||cat}
+            </button>;
+          })}
+          {dailyCatsAvail.length>1&&<button onClick={()=>setTrendCats(allOn?[]:[...dailyCatsAvail])} style={{padding:"4px 10px",borderRadius:14,border:`1px dashed ${T.borderMid}`,background:"transparent",color:T.textSecondary,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",marginLeft:"auto"}}>{allOn?"Clear all":"Select all"}</button>}
+        </div>}
+        {/* Chart */}
+        <svg width="100%" viewBox={`0 0 ${chartW} ${chartH}`} preserveAspectRatio="none" style={{display:"block",overflow:"visible"}}>
+          {/* Baseline */}
+          <line x1={padX} y1={padY+innerH} x2={chartW-padX} y2={padY+innerH} stroke={T.borderSoft} strokeWidth="1"/>
+          {/* Total path (spiky daily) */}
+          <path d={totalPath} fill="none" stroke={T.accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          {/* Category overlays */}
+          {trendCats.filter(c=>byDayCat[c]).map(cat=>{
+            const col=COLS[cat]||T.accent;
+            return <path key={cat} d={buildDailyPath(byDayCat[cat],lastDataDay)} fill="none" stroke={col} strokeWidth={catStroke} strokeLinecap="round" strokeLinejoin="round" opacity="0.85"/>;
+          })}
+          {/* Today marker for current month */}
+          {isCurMonthLocal&&<line x1={xFor(lastDataDay)} y1={padY} x2={xFor(lastDataDay)} y2={padY+innerH} stroke={T.textMuted} strokeWidth="1" strokeDasharray="2,3" opacity="0.5"/>}
+          {/* X-axis labels — every ~5 days */}
+          {[1,Math.ceil(monthDIM/4),Math.ceil(monthDIM/2),Math.ceil(monthDIM*3/4),monthDIM].filter((v,i,a)=>a.indexOf(v)===i).map(d=><text key={d} x={xFor(d)} y={chartH-4} textAnchor="middle" fontSize="9" fill={T.textMuted} fontFamily="DM Mono" fontWeight="500">{d}</text>)}
         </svg>
-        <div style={{display:"flex",gap:14,fontSize:10,color:T.textMuted,marginTop:6,flexWrap:"wrap"}}>
-          <span><span style={{display:"inline-block",width:10,height:2,background:T.accent,verticalAlign:"middle",marginRight:4}}/> Actual</span>
-          <span><span style={{display:"inline-block",width:10,height:2,background:T.accent,opacity:0.5,verticalAlign:"middle",marginRight:4}}/> Projected</span>
-          {dailyBudget>0&&<span><span style={{display:"inline-block",width:10,height:2,background:T.warning,verticalAlign:"middle",marginRight:4}}/> Budget cap</span>}
-        </div>
+        {/* Per-category averages legend (only when <=6) */}
+        {trendCats.length>0&&trendCats.length<=6&&<div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${T.borderSoft}`,display:"flex",flexDirection:"column",gap:4}}>
+          {trendCats.filter(c=>byDayCat[c]).map(cat=>{
+            const col=COLS[cat]||T.accent;
+            const tot=byDayCat[cat].reduce((s,v)=>s+v,0);
+            return <div key={cat} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11}}>
+              <span style={{display:"inline-flex",alignItems:"center",gap:6,color:T.textSecondary}}>
+                <span style={{width:10,height:2,background:col,display:"inline-block",borderRadius:1}}/>
+                {cat}
+              </span>
+              <span style={{fontFamily:"'DM Mono'",color:T.textMuted,fontWeight:600}}>{fmtCompact2(tot)}</span>
+            </div>;
+          })}
+        </div>}
+        {trendCats.length>6&&<div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${T.borderSoft}`,fontSize:11,color:T.textMuted,textAlign:"center"}}>{trendCats.length} categories shown — clear some for per-line totals</div>}
+        {/* Context summary */}
         <div style={{marginTop:12,padding:"10px 12px",background:T.surface2,borderRadius:10,fontSize:11,color:T.textSecondary,lineHeight:1.5}}>
-          <span style={{color:T.textMuted,fontWeight:600}}>Why we think this:</span> You've spent {fmt(varTotal)} in {dayOfMonth} days (avg {fmt(dailyAvg)}/day). At this pace you'll hit {fmt(projected)} by month-end. Your actual landing could be ±{fmt(projected*0.1)} depending on the next {remainingDays} days.
+          {peakDay.amt>0&&<>Biggest spend day: <span style={{color:T.textPrimary,fontWeight:600}}>Day {peakDay.day}</span> ({fmt(peakDay.amt)}). </>}
+          {zeroDays>0&&<>{zeroDays} {zeroDays===1?"day":"days"} with no spending. </>}
+          Total {fmt(varTotal)} over {lastDataDay} {lastDataDay===1?"day":"days"}.
         </div>
-      </div>
-
-      {projByCat.length>0&&<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:"16px 18px",marginBottom:14,boxShadow:T.cardShadow}}>
-        <div style={{fontSize:13,fontWeight:700,color:T.textPrimary,marginBottom:12}}>Where you'll likely land</div>
-        {projByCat.map(({cat,actual,projected:p},i)=>{
-          const budget=profile.budgets?.[cat];
-          const overBudget=budget>0&&p>budget;
-          return <div key={i} style={{marginBottom:10}}>
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-              <span style={{fontSize:12,color:T.textPrimary,fontWeight:500}}>{cat}</span>
-              <span style={{fontSize:12,fontFamily:"'DM Mono'",fontWeight:600,color:overBudget?T.negative:T.textPrimary}}>{fmt(actual)} → {fmt(p)}</span>
-            </div>
-            <div style={{height:4,background:T.borderSoft,borderRadius:4,overflow:"hidden"}}>
-              <div style={{height:"100%",width:`${Math.min(100,(actual/p)*100)}%`,background:COLS[cat]||T.accent,borderRadius:4}}/>
-            </div>
-            {overBudget&&<div style={{fontSize:10,color:T.negative,marginTop:3,fontWeight:600}}>⚠ Will exceed budget of {fmt(budget)}</div>}
-          </div>;
-        })}
+      </div>:<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:"22px 18px",marginBottom:14,textAlign:"center",boxShadow:T.cardShadow}}>
+        <div style={{fontSize:24,marginBottom:8}}>📊</div>
+        <div style={{fontSize:13,color:T.textSecondary}}>No spending transactions for {monthLabel(selectedMonth)} yet.</div>
       </div>}
 
-      {projByCat[0]&&<div style={{background:T.accentSoft,border:`1px solid ${T.accentBorder}`,borderRadius:18,padding:"14px 16px"}}>
-        <div style={{fontSize:13,fontWeight:700,color:T.accent,marginBottom:6}}>💡 What if?</div>
-        <div style={{fontSize:12,color:T.textSecondary,lineHeight:1.55}}>
-          Your top spend is <span style={{fontWeight:700,color:T.textPrimary}}>{projByCat[0].cat}</span>. If you shave 20% off that for the rest of the month, you'd save an extra <span style={{fontWeight:700,color:T.accent}}>{fmt(projByCat[0].projected*0.2*(remainingDays/daysInMonth))}</span>.
-        </div>
-      </div>}
+      {/* Category projection (current month only) */}
+      {isCurMonthLocal&&dayOfMonth>5&&byCat.length>0&&(()=>{
+        const projByCat=byCat.slice(0,4).map(([cat,amt])=>({cat,actual:Math.abs(amt),projected:Math.abs(amt)*(daysInMonth/dayOfMonth)}));
+        return <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:"16px 18px",marginBottom:14,boxShadow:T.cardShadow}}>
+          <div style={{fontSize:13,fontWeight:700,color:T.textPrimary,marginBottom:12}}>Where you'll likely land</div>
+          {projByCat.map(({cat,actual,projected:p},i)=>{
+            const budget=profile.budgets?.[cat];
+            const overBudget=budget>0&&p>budget;
+            return <div key={i} style={{marginBottom:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                <span style={{fontSize:12,color:T.textPrimary,fontWeight:500}}>{cat}</span>
+                <span style={{fontSize:12,fontFamily:"'DM Mono'",fontWeight:600,color:overBudget?T.negative:T.textPrimary}}>{fmt(actual)} → {fmt(p)}</span>
+              </div>
+              <div style={{height:4,background:T.borderSoft,borderRadius:4,overflow:"hidden"}}>
+                <div style={{height:"100%",width:`${Math.min(100,(actual/p)*100)}%`,background:COLS[cat]||T.accent,borderRadius:4}}/>
+              </div>
+              {overBudget&&<div style={{fontSize:10,color:T.negative,marginTop:3,fontWeight:600}}>⚠ Will exceed budget of {fmt(budget)}</div>}
+            </div>;
+          })}
+        </div>;
+      })()}
+
+      {/* What-if (current month only with data) */}
+      {isCurMonthLocal&&dayOfMonth>5&&byCat[0]&&(()=>{
+        const top=byCat[0]; const topName=top[0]; const topAmt=Math.abs(top[1]);
+        const topProj=topAmt*(daysInMonth/dayOfMonth);
+        const remDays=daysInMonth-dayOfMonth;
+        return <div style={{background:T.accentSoft,border:`1px solid ${T.accentBorder}`,borderRadius:18,padding:"14px 16px"}}>
+          <div style={{fontSize:13,fontWeight:700,color:T.accent,marginBottom:6}}>💡 What if?</div>
+          <div style={{fontSize:12,color:T.textSecondary,lineHeight:1.55}}>
+            Your top spend is <span style={{fontWeight:700,color:T.textPrimary}}>{topName}</span>. If you shave 20% off that for the rest of the month, you'd save an extra <span style={{fontWeight:700,color:T.accent}}>{fmt(topProj*0.2*(remDays/daysInMonth))}</span>.
+          </div>
+        </div>;
+      })()}
     </div>;
   };
 
@@ -2194,26 +2321,39 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       {byCat.length>1&&<div style={{padding:"0 14px 10px",display:"flex",gap:6,overflowX:"auto"}}>
         {["All",...byCat.map(([c])=>c)].map(c=><button key={c} onClick={()=>setCatFilter(c)} style={{padding:"6px 12px",borderRadius:16,border:`1px solid ${catFilter===c?T.accent:T.border}`,background:catFilter===c?T.accentSoft:"transparent",color:catFilter===c?T.accent:T.textMuted,fontSize:11,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit",flexShrink:0,fontWeight:catFilter===c?700:500}}>{c==="All"?"All":c.split(" ")[0]}</button>)}
       </div>}
-      {filteredTxs.slice(0,30).map((t,i)=><div key={t.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 18px",borderTop:`1px solid ${T.borderSoft}`,cursor:"pointer"}} onClick={()=>{setTxDetailId(t.id);setTxDetailMonth(selectedMonth);}}>
-        <div style={{width:32,height:32,borderRadius:10,background:(COLS[t.category]||"#868E96")+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{t.category?.split(" ")[0]||"📦"}</div>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{fontSize:13,fontWeight:500,color:T.textPrimary,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",display:"flex",alignItems:"center",gap:6}}>
-            {t.description}
-            {t.notes&&<span title="Has note" style={{fontSize:10,color:T.textMuted,flexShrink:0}}>📝</span>}
-            {t.split?.with&&<span title={`Split with ${t.split.with}`} style={{fontSize:10,flexShrink:0}}>🤝</span>}
-          </div>
-          <div style={{fontSize:10,color:T.textMuted,fontFamily:"'DM Mono'"}}>{t.date}{t.split?.with?` · ${Math.round((t.split.share||0)*100)}% with ${t.split.with}`:""}</div>
-        </div>
-        <div style={{textAlign:"right",flexShrink:0}}>
-          {t.split?.with
-            ?<>
-              <div style={{fontFamily:"'DM Mono'",fontSize:13,fontWeight:600,color:t.amount<0?T.positive:T.textPrimary}}>{t.amount<0?"-":""}{fmt(Math.abs(effectiveAmount(t)))}</div>
-              <div style={{fontFamily:"'DM Mono'",fontSize:10,color:T.textMuted,textDecoration:"line-through"}}>{fmt(Math.abs(t.amount))}</div>
-            </>
-            :<div style={{fontFamily:"'DM Mono'",fontSize:13,fontWeight:600,color:t.amount<0?T.positive:T.textPrimary}}>{t.amount<0?"-":""}{fmt(Math.abs(t.amount))}</div>}
-        </div>
-      </div>)}
-      {filteredTxs.length>30&&<div style={{padding:"12px 18px",fontSize:11,color:T.textMuted,textAlign:"center"}}>Showing first 30 of {filteredTxs.length}</div>}
+      {(()=>{
+        const PER_PAGE=30;
+        const totalPages=Math.max(1,Math.ceil(filteredTxs.length/PER_PAGE));
+        const page=Math.min(txPage,totalPages);
+        const start=(page-1)*PER_PAGE;
+        const slice=filteredTxs.slice(start,start+PER_PAGE);
+        return <>
+          {slice.map((t,i)=><div key={t.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 18px",borderTop:`1px solid ${T.borderSoft}`,cursor:"pointer"}} onClick={()=>{setTxDetailId(t.id);setTxDetailMonth(selectedMonth);}}>
+            <div style={{width:32,height:32,borderRadius:10,background:(COLS[t.category]||"#868E96")+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{t.category?.split(" ")[0]||"📦"}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:500,color:T.textPrimary,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",display:"flex",alignItems:"center",gap:6}}>
+                {t.description}
+                {t.notes&&<span title="Has note" style={{fontSize:10,color:T.textMuted,flexShrink:0}}>📝</span>}
+                {t.split?.with&&<span title={`Split with ${t.split.with}`} style={{fontSize:10,flexShrink:0}}>🤝</span>}
+              </div>
+              <div style={{fontSize:10,color:T.textMuted,fontFamily:"'DM Mono'"}}>{t.date}{t.split?.with?` · ${Math.round((t.split.share||0)*100)}% with ${t.split.with}`:""}</div>
+            </div>
+            <div style={{textAlign:"right",flexShrink:0}}>
+              {t.split?.with
+                ?<>
+                  <div style={{fontFamily:"'DM Mono'",fontSize:13,fontWeight:600,color:t.amount<0?T.positive:T.textPrimary}}>{t.amount<0?"-":""}{fmt(Math.abs(effectiveAmount(t)))}</div>
+                  <div style={{fontFamily:"'DM Mono'",fontSize:10,color:T.textMuted,textDecoration:"line-through"}}>{fmt(Math.abs(t.amount))}</div>
+                </>
+                :<div style={{fontFamily:"'DM Mono'",fontSize:13,fontWeight:600,color:t.amount<0?T.positive:T.textPrimary}}>{t.amount<0?"-":""}{fmt(Math.abs(t.amount))}</div>}
+            </div>
+          </div>)}
+          {totalPages>1&&<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 18px",borderTop:`1px solid ${T.borderSoft}`}}>
+            <button onClick={()=>setTxPage(p=>Math.max(1,p-1))} disabled={page<=1} style={{width:32,height:32,borderRadius:16,border:`1px solid ${T.border}`,background:"transparent",color:page<=1?T.textMuted:T.textSecondary,fontSize:18,cursor:page<=1?"default":"pointer",fontFamily:"inherit",lineHeight:1,opacity:page<=1?0.4:1}}>‹</button>
+            <div style={{fontSize:11,color:T.textMuted,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.3}}>Page {page} of {totalPages} · {filteredTxs.length} total</div>
+            <button onClick={()=>setTxPage(p=>Math.min(totalPages,p+1))} disabled={page>=totalPages} style={{width:32,height:32,borderRadius:16,border:`1px solid ${T.border}`,background:"transparent",color:page>=totalPages?T.textMuted:T.textSecondary,fontSize:18,cursor:page>=totalPages?"default":"pointer",fontFamily:"inherit",lineHeight:1,opacity:page>=totalPages?0.4:1}}>›</button>
+          </div>}
+        </>;
+      })()}
     </div>}
 
     {/* Empty state */}
@@ -2241,12 +2381,92 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       </div>
     </div>
 
+    {/* Viewing past month banner */}
+    {selectedMonth!==currentMonth()&&<div onClick={()=>setSelectedMonth(currentMonth())} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"10px 14px",background:T.warning+"15",border:`1px solid ${T.warning}30`,borderRadius:14,marginBottom:18,cursor:"pointer"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
+        <span style={{fontSize:14,flexShrink:0}}>🕘</span>
+        <div style={{fontSize:12,color:T.warning,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Viewing {monthLabel(selectedMonth)} — past month data below</div>
+      </div>
+      <span style={{fontSize:11,color:T.warning,fontWeight:700,whiteSpace:"nowrap",flexShrink:0}}>← Back to current</span>
+    </div>}
+
+    {/* HERO — earnings prominent, breakdown pill below */}
+    <div style={{marginBottom:22}}>
+      {incTotal>0?(()=>{
+        const isPastMonth=selectedMonth<currentMonth();
+        const isFutureMonth=selectedMonth>currentMonth();
+
+        // Future month — placeholder
+        if(isFutureMonth){
+          return <>
+            <div style={{fontSize:13,color:T.textSecondary,marginBottom:6,fontWeight:500}}>Future month</div>
+            <div style={{fontSize:36,fontWeight:700,color:T.textPrimary,letterSpacing:-1,lineHeight:1.1,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>{monthLabel(selectedMonth)}</div>
+            <div style={{fontSize:14,color:T.textSecondary,marginTop:8,lineHeight:1.5}}>Hasn't happened yet. Switch to <span onClick={()=>setSelectedMonth(currentMonth())} style={{color:T.accent,fontWeight:700,cursor:"pointer"}}>this month</span> to see what's going on.</div>
+          </>;
+        }
+
+        // Current or past — show earnings as hero, breakdown below
+        const earnedLabel=isPastMonth?"Earned":(isCurMonth&&dayOfMonth<=14?"Earnings expected":"Earned");
+        return <>
+          <div style={{fontSize:13,color:T.textSecondary,marginBottom:6,fontWeight:500,display:"flex",alignItems:"center",gap:6}}>
+            {isCurMonth&&<span style={{display:"inline-block",width:6,height:6,borderRadius:3,background:T.accent,boxShadow:`0 0 0 4px ${T.accent}25`}}/>}
+            {earnedLabel} {isCurMonth?"this month":`in ${monthLabel(selectedMonth).split(" ")[0]}`}
+          </div>
+          <div style={{fontSize:56,fontWeight:700,color:T.textPrimary,letterSpacing:-2,lineHeight:1,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>
+            {(()=>{ const abs=Math.abs(incTotal); const cents=(abs-Math.floor(abs)).toFixed(2).slice(1); return <><CountUp value={Math.floor(abs)} duration={900} format={n=>sym+Math.floor(n).toLocaleString("en-SG")}/><span style={{fontSize:28,color:T.textMuted,fontWeight:500}}>{cents}</span></>; })()}
+          </div>
+
+          {/* Breakdown pill */}
+          <div style={{display:"flex",gap:8,marginTop:18,padding:"10px 12px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,boxShadow:T.cardShadow}}>
+            <div style={{flex:1,textAlign:"center",padding:"4px 6px"}}>
+              <div style={{fontSize:9,color:T.textMuted,fontWeight:700,letterSpacing:0.4,fontFamily:"'DM Mono'"}}>EARNED</div>
+              <div style={{fontSize:13,fontWeight:700,color:T.textPrimary,fontFamily:"'DM Mono'",marginTop:2}}>{fmt(incTotal)}</div>
+            </div>
+            <div style={{width:1,background:T.borderSoft,margin:"4px 0"}}/>
+            <div style={{flex:1,textAlign:"center",padding:"4px 6px"}}>
+              <div style={{fontSize:9,color:T.textMuted,fontWeight:700,letterSpacing:0.4,fontFamily:"'DM Mono'"}}>BILLS</div>
+              <div style={{fontSize:13,fontWeight:700,color:T.bills,fontFamily:"'DM Mono'",marginTop:2}}>{fmt(fixedTotal)}</div>
+            </div>
+            <div style={{width:1,background:T.borderSoft,margin:"4px 0"}}/>
+            <div style={{flex:1,textAlign:"center",padding:"4px 6px"}}>
+              <div style={{fontSize:9,color:T.textMuted,fontWeight:700,letterSpacing:0.4,fontFamily:"'DM Mono'"}}>SPENT</div>
+              <div style={{fontSize:13,fontWeight:700,color:T.spent,fontFamily:"'DM Mono'",marginTop:2}}>{fmt(varTotal)}</div>
+            </div>
+            <div style={{width:1,background:T.borderSoft,margin:"4px 0"}}/>
+            <div style={{flex:1,textAlign:"center",padding:"4px 6px"}}>
+              <div style={{fontSize:9,color:T.textMuted,fontWeight:700,letterSpacing:0.4,fontFamily:"'DM Mono'"}}>KEPT</div>
+              <div style={{fontSize:13,fontWeight:700,color:saved>=0?T.accent:T.negative,fontFamily:"'DM Mono'",marginTop:2}}>{fmt(saved)}</div>
+            </div>
+          </div>
+
+          {/* Context line */}
+          {isCurMonth?<div style={{fontSize:12,color:T.textMuted,marginTop:12,lineHeight:1.5,textAlign:"center"}}>
+            Day {dayOfMonth} of {daysInMonth}{savingsRate>0&&dayOfMonth>5?` · ${savingsRate.toFixed(0)}% saved so far`:""}{prevSaved!==0&&saved>=0&&savedDelta!==0?` · ${savedDelta>=0?"+":""}${fmt(savedDelta)} vs last month`:""}
+          </div>:<div style={{fontSize:12,color:T.textMuted,marginTop:12,lineHeight:1.5,textAlign:"center"}}>
+            {savingsRate.toFixed(0)}% saved of income{prevSaved!==0&&savedDelta!==0?` · ${savedDelta>=0?"better":"less"} than the month before`:""}
+          </div>}
+        </>;
+      })():<>
+        <div style={{fontSize:13,color:T.textSecondary,marginBottom:6,fontWeight:500}}>Welcome to {monthLabel(selectedMonth)}</div>
+        <div style={{fontSize:32,fontWeight:700,color:T.textPrimary,letterSpacing:-1,lineHeight:1.1,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>Let's get you set up</div>
+        <div style={{fontSize:14,color:T.textSecondary,marginTop:8,lineHeight:1.5}}>Add your income sources in <span onClick={()=>setTab("you")} style={{color:T.accent,fontWeight:700,cursor:"pointer"}}>You</span> to see your full picture.</div>
+      </>}
+    </div>
+
+    {/* WHERE IT WENT — stacked bar viz, lighter now that we have the breakdown pill */}
+    {(fixedTotal>0||varTotal>0||Math.max(0,saved)>0)&&<div style={{marginBottom:22}}>
+      <div style={{display:"flex",height:10,borderRadius:5,overflow:"hidden",gap:2,background:T.surface2}}>
+        {billsFlex>0&&<div style={{flex:billsFlex,background:T.bills}}/>}
+        {spentFlex>0&&<div style={{flex:spentFlex,background:T.spent}}/>}
+        {savedFlex>0&&<div style={{flex:savedFlex,background:T.accent}}/>}
+      </div>
+    </div>}
+
     {/* ── Across all months ── (cross-month section, independent of selectedMonth) */}
     {spendingTrend.filter(p=>p.hasData).length>=2&&(()=>{
       const pts=spendingTrend.filter(p=>p.hasData);
       const last3=pts.slice(-3);
       const avg3=last3.length>0?last3.reduce((s,p)=>s+p.total,0)/last3.length:0;
-      // Top category across all months (count of months it was top)
       const monthTops=pts.map(p=>{
         const entries=Object.entries(p.byCat).sort((a,b)=>b[1]-a[1]);
         return entries[0]?entries[0][0]:null;
@@ -2273,103 +2493,6 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         </div>
       </div>;
     })()}
-
-    {/* Viewing past month banner */}
-    {selectedMonth!==currentMonth()&&<div onClick={()=>setSelectedMonth(currentMonth())} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"10px 14px",background:T.warning+"15",border:`1px solid ${T.warning}30`,borderRadius:14,marginBottom:18,cursor:"pointer"}}>
-      <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
-        <span style={{fontSize:14,flexShrink:0}}>🕘</span>
-        <div style={{fontSize:12,color:T.warning,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Viewing {monthLabel(selectedMonth)} — past month data below</div>
-      </div>
-      <span style={{fontSize:11,color:T.warning,fontWeight:700,whiteSpace:"nowrap",flexShrink:0}}>← Back to current</span>
-    </div>}
-
-    {/* HERO */}
-    <div style={{marginBottom:26}}>
-      {incTotal>0?(()=>{
-        // Determine what to show based on month state
-        const isPastMonth=selectedMonth<currentMonth();
-        const isFutureMonth=selectedMonth>currentMonth();
-        const isEarlyInMonth=isCurMonth&&dayOfMonth<=14;
-        const isLateInMonth=isCurMonth&&dayOfMonth>14;
-        const hasEnoughDataForProjection=isCurMonth&&dayOfMonth>5&&txs.length>=3;
-
-        // Future month
-        if(isFutureMonth){
-          return <>
-            <div style={{fontSize:13,color:T.textSecondary,marginBottom:6,fontWeight:500}}>Future month</div>
-            <div style={{fontSize:36,fontWeight:700,color:T.textPrimary,letterSpacing:-1,lineHeight:1.1,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>{monthLabel(selectedMonth)}</div>
-            <div style={{fontSize:14,color:T.textSecondary,marginTop:8,lineHeight:1.5}}>Hasn't happened yet. Switch to <span onClick={()=>setSelectedMonth(currentMonth())} style={{color:T.accent,fontWeight:700,cursor:"pointer"}}>this month</span> to see what's going on.</div>
-          </>;
-        }
-
-        // Early in current month + we can project — show projection as primary, actual as secondary
-        if(isEarlyInMonth&&hasEnoughDataForProjection){
-          const projGood=projectedSaved>=0;
-          return <>
-            <div style={{fontSize:13,color:T.textSecondary,marginBottom:6,fontWeight:500,display:"flex",alignItems:"center",gap:6}}>
-              <span style={{display:"inline-block",width:6,height:6,borderRadius:3,background:T.accent,boxShadow:`0 0 0 4px ${T.accent}25`}}/>
-              On track to {projGood?"keep":"go over by"}
-            </div>
-            <div style={{fontSize:56,fontWeight:700,color:T.textPrimary,letterSpacing:-2,lineHeight:1,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>
-              {(()=>{ const abs=Math.abs(projectedSaved); const cents=(abs-Math.floor(abs)).toFixed(2).slice(1); return <><CountUp value={Math.floor(abs)} duration={900} format={n=>sym+Math.floor(n).toLocaleString("en-SG")}/><span style={{fontSize:28,color:T.textMuted,fontWeight:500}}>{cents}</span></>; })()}
-            </div>
-            <div style={{fontSize:13,color:T.textMuted,marginTop:6,lineHeight:1.5}}>by end of {monthLabel(selectedMonth).split(" ")[0]} · <span style={{color:T.textSecondary,fontWeight:600}}>{fmt(Math.abs(saved))} {saved>=0?"kept":"over"} so far</span> · day {dayOfMonth} of {daysInMonth}</div>
-          </>;
-        }
-
-        // Early in current month but not enough data — show partial actual
-        if(isEarlyInMonth&&!hasEnoughDataForProjection){
-          return <>
-            <div style={{fontSize:13,color:T.textSecondary,marginBottom:6,fontWeight:500}}>So far this month</div>
-            <div style={{fontSize:56,fontWeight:700,color:T.textPrimary,letterSpacing:-2,lineHeight:1,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>
-              {(()=>{ const abs=Math.abs(saved); const cents=(abs-Math.floor(abs)).toFixed(2).slice(1); return <><CountUp value={Math.floor(abs)} duration={900} format={n=>sym+Math.floor(n).toLocaleString("en-SG")}/><span style={{fontSize:28,color:T.textMuted,fontWeight:500}}>{cents}</span></>; })()}
-            </div>
-            <div style={{fontSize:13,color:T.textMuted,marginTop:6,lineHeight:1.5}}>day {dayOfMonth} · add a few transactions to see your full pace</div>
-          </>;
-        }
-
-        // Late in current month or past month — show actual with full context
-        return <>
-          <div style={{fontSize:13,color:T.textSecondary,marginBottom:6,fontWeight:500}}>{isPastMonth?"You kept":(saved>=0?"You've kept":"You're over by")}</div>
-          <div style={{fontSize:56,fontWeight:700,color:T.textPrimary,letterSpacing:-2,lineHeight:1,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>
-            {(()=>{ const abs=Math.abs(saved); const cents=(abs-Math.floor(abs)).toFixed(2).slice(1); return <><CountUp value={Math.floor(abs)} duration={900} format={n=>sym+Math.floor(n).toLocaleString("en-SG")}/><span style={{fontSize:28,color:T.textMuted,fontWeight:500}}>{cents}</span></>; })()}
-          </div>
-          <div style={{fontSize:14,color:T.textSecondary,marginTop:8,lineHeight:1.5}}>
-            {saved>=0
-              ?<>That's <span style={{color:T.accent,fontWeight:700}}>{savingsRate.toFixed(0)}% saved</span>{isPastMonth?" of income":" this month"}{prevSaved!==0&&savedDelta!==0?` — ${savedDelta>=0?"better":"less"} than last month`:""}{prevSaved>0&&savedDelta>0?" 🎉":""}</>
-              :<>Spending exceeded income by <span style={{color:T.negative,fontWeight:700}}>{fmt(Math.abs(saved))}</span></>}
-          </div>
-        </>;
-      })():<>
-        <div style={{fontSize:13,color:T.textSecondary,marginBottom:6,fontWeight:500}}>Welcome to {monthLabel(selectedMonth)}</div>
-        <div style={{fontSize:32,fontWeight:700,color:T.textPrimary,letterSpacing:-1,lineHeight:1.1,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>Let's get you set up</div>
-        <div style={{fontSize:14,color:T.textSecondary,marginTop:8,lineHeight:1.5}}>Add your income sources in <span onClick={()=>setTab("you")} style={{color:T.accent,fontWeight:700,cursor:"pointer"}}>You</span> to see your full picture.</div>
-      </>}
-    </div>
-
-    {/* WHERE IT WENT */}
-    {(fixedTotal>0||varTotal>0||Math.max(0,saved)>0)&&<div style={{marginBottom:22}}>
-      <MicroLabel style={{marginBottom:10}}>WHERE IT WENT</MicroLabel>
-      <div style={{display:"flex",height:14,borderRadius:7,overflow:"hidden",marginBottom:12,gap:2,background:T.surface2}}>
-        {billsFlex>0&&<div style={{flex:billsFlex,background:T.bills}}/>}
-        {spentFlex>0&&<div style={{flex:spentFlex,background:T.spent}}/>}
-        {savedFlex>0&&<div style={{flex:savedFlex,background:T.accent}}/>}
-      </div>
-      <div style={{display:"flex",justifyContent:"space-between",fontSize:11}}>
-        <div>
-          <div style={{display:"inline-block",width:8,height:8,borderRadius:4,background:T.bills,marginRight:6,verticalAlign:"middle"}}/><span style={{color:T.textSecondary}}>Bills</span>
-          <div style={{fontFamily:"'DM Mono'",fontSize:13,fontWeight:600,color:T.textPrimary,marginTop:2}}>{fmt(fixedTotal)}</div>
-        </div>
-        <div style={{textAlign:"center"}}>
-          <div style={{display:"inline-block",width:8,height:8,borderRadius:4,background:T.spent,marginRight:6,verticalAlign:"middle"}}/><span style={{color:T.textSecondary}}>Spent</span>
-          <div style={{fontFamily:"'DM Mono'",fontSize:13,fontWeight:600,color:T.textPrimary,marginTop:2}}>{fmt(varTotal)}</div>
-        </div>
-        <div style={{textAlign:"right"}}>
-          <div style={{display:"inline-block",width:8,height:8,borderRadius:4,background:saved>=0?T.accent:T.negative,marginRight:6,verticalAlign:"middle"}}/><span style={{color:T.textSecondary}}>Saved</span>
-          <div style={{fontFamily:"'DM Mono'",fontSize:13,fontWeight:600,color:saved>=0?T.accent:T.negative,marginTop:2}}>{fmt(saved)}</div>
-        </div>
-      </div>
-    </div>}
 
     {/* Goal emphasis card (different for each goal type) */}
     {profile.goal&&(()=>{
