@@ -44,7 +44,7 @@ const monthsBetween = (a,b) => { const [ay,am]=a.split("-").map(Number); const [
 
 const DEFAULT_PROFILE = {
   name:"",occupation:"",currency:"SGD",avatar:"",
-  incomeStreams:[],fixedCommitments:[],goals:[],
+  incomeStreams:[],fixedCommitments:[],subscriptions:[],goals:[],
   customCategories:[],budgets:{},
   onboarded:false,
   accentColor: CALM_DEFAULT_ACCENT,
@@ -95,6 +95,17 @@ function effectiveAmount(t){
   if(!t?.split||!t.split.with||typeof t.split.share!=="number") return t.amount;
   const share=Math.max(0,Math.min(1,t.split.share));
   return t.amount*share;
+}
+// Convert a subscription's amount + frequency to a monthly-equivalent figure
+function subscriptionMonthly(sub){
+  const a=+sub?.amount||0;
+  switch(sub?.frequency){
+    case "weekly": return a*52/12;
+    case "quarterly": return a/3;
+    case "yearly": return a/12;
+    case "monthly":
+    default: return a;
+  }
 }
 function getAllCatCols(cc=[]){ const x={}; (cc||[]).forEach(c=>{x[`${c.emoji} ${c.name}`]=c.color||"#868E96";}); return {...CAT_COLORS,...x}; }
 function isFixedCat(cat){ return FIXED_CATS.includes(cat); }
@@ -279,9 +290,8 @@ function TxDetailModal({tx,month,monthLabel,allCats,fmt,onSave,onArchive,onClose
     date:tx.date||"",
     notes:tx.notes||"",
     split:tx.split?{with:tx.split.with||"",share:tx.split.share||0.5}:null,
-    isSubscription:!!tx.isSubscription,
   });
-  const dirty=d.description!==(tx.description||"")||parseFloat(d.amount)!==tx.amount||d.category!==tx.category||d.date!==tx.date||(d.notes||"")!==(tx.notes||"")||JSON.stringify(d.split||null)!==JSON.stringify(tx.split||null)||d.isSubscription!==!!tx.isSubscription;
+  const dirty=d.description!==(tx.description||"")||parseFloat(d.amount)!==tx.amount||d.category!==tx.category||d.date!==tx.date||(d.notes||"")!==(tx.notes||"")||JSON.stringify(d.split||null)!==JSON.stringify(tx.split||null);
   const save=()=>{
     const amtN=parseFloat(d.amount);
     if(!d.description.trim()||isNaN(amtN)) return;
@@ -292,7 +302,6 @@ function TxDetailModal({tx,month,monthLabel,allCats,fmt,onSave,onArchive,onClose
     } else {
       delete out.split;
     }
-    if(d.isSubscription) out.isSubscription=true; else delete out.isSubscription;
     onSave(out); onClose();
   };
   const inpS={padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"inherit",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"};
@@ -326,16 +335,6 @@ function TxDetailModal({tx,month,monthLabel,allCats,fmt,onSave,onArchive,onClose
       <div>
         <div style={{fontSize:10,color:T.textMuted,marginBottom:4,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.5}}>NOTE <span style={{color:T.textMuted,fontWeight:400,letterSpacing:0,textTransform:"none"}}>(optional)</span></div>
         <textarea value={d.notes} onChange={e=>setD({...d,notes:e.target.value})} placeholder="Add a note — what was this for, who you were with…" rows={3} style={{...inpS,resize:"vertical",minHeight:60,fontFamily:"inherit"}}/>
-      </div>
-      {/* Mark as subscription */}
-      <div style={{padding:"10px 12px",background:d.isSubscription?T.accentSoft:T.surface2,border:`1px solid ${d.isSubscription?T.accentBorder:T.borderSoft}`,borderRadius:12,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <span style={{fontSize:14}}>📱</span>
-          <span style={{fontSize:12,fontWeight:600,color:T.textPrimary}}>Mark as subscription</span>
-        </div>
-        <div onClick={()=>setD({...d,isSubscription:!d.isSubscription})} style={{width:36,height:22,borderRadius:11,background:d.isSubscription?T.accent:T.borderMid,padding:2,boxSizing:"border-box",cursor:"pointer",transition:"background .15s",flexShrink:0,position:"relative"}}>
-          <div style={{width:18,height:18,borderRadius:9,background:"#fff",transform:`translateX(${d.isSubscription?14:0}px)`,transition:"transform .15s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}/>
-        </div>
       </div>
       {/* Split with */}
       <div style={{padding:"12px 12px",background:d.split?T.accentSoft:T.surface2,border:`1px solid ${d.split?T.accentBorder:T.borderSoft}`,borderRadius:12}}>
@@ -677,6 +676,9 @@ export default function App(){
   const [txPage,setTxPage]=useState(1);
   // Money tab — collapsible sections (default all open)
   const [moneyCollapsed,setMoneyCollapsed]=useState({income:false,bills:false,recent:false});
+  // Subscriptions editor — null = list view, "new" = adding, or {id} = editing existing
+  const [subEditor,setSubEditor]=useState(null);
+  const [subDraft,setSubDraft]=useState(null);
   const toggleMoneySection=key=>setMoneyCollapsed(c=>({...c,[key]:!c[key]}));
   // First-time + button coachmark — shown once per device
   const [showAddCoachmark,setShowAddCoachmark]=useState(false);
@@ -799,37 +801,65 @@ export default function App(){
     return Object.entries(agg).sort((a,b)=>b[1]-a[1]).map(([cat])=>cat);
   },[spendingTrend]);
 
-  const detectedSubscriptions=useMemo(()=>{
+  // Declared subscriptions — the source of truth (user-managed)
+  const declaredSubscriptions=useMemo(()=>{
+    const localCols=getAllCatCols(profile?.customCategories);
+    return (profile?.subscriptions||[]).map(s=>({
+      ...s,
+      monthlyEquiv:subscriptionMonthly(s),
+      color:localCols[s.category]||"#868E96",
+      declared:true
+    }));
+  },[profile?.subscriptions,profile?.customCategories]);
+
+  // Suggested subscriptions — auto-detected from statements; filtered to exclude already-declared
+  const suggestedSubscriptions=useMemo(()=>{
     const months=Object.keys(monthlyData).filter(m=>!profile?.startMonth||m>=profile.startMonth).sort();
     if(months.length<1) return [];
-    // Well-known subscription merchants — strong signal, even on single occurrence
     const SUB_MERCHANT_REGEX=/netflix|spotify|prime video|youtube premium|youtube music|apple|disney\+?|disney plus|hbo|hulu|paramount|adobe|notion|figma|canva|github|chatgpt|claude|openai|anthropic|dropbox|microsoft 365|office 365|google one|icloud|expressvpn|nordvpn|surfshark|setapp|1password|grammarly|duolingo|audible|tidal|deezer|patreon|substack|medium|coursera|udemy|linkedin premium|zoom|slack|gusto|xero|quickbooks|asana|trello|miro|loom|hubspot|mailchimp|squarespace|wordpress|cloudflare/i;
     const desc={};
     months.forEach(m=>{(monthlyData[m]?.txs||[]).forEach(t=>{
       const k=t.description?.toLowerCase().trim(); if(!k) return;
-      if(!desc[k]) desc[k]={count:0,amounts:[],description:t.description,category:t.category,monthsSeen:new Set(),lastDate:"",manuallyMarked:false};
+      if(!desc[k]) desc[k]={count:0,amounts:[],description:t.description,category:t.category,monthsSeen:new Set(),lastDate:""};
       desc[k].count++; desc[k].amounts.push(Math.abs(t.amount)); desc[k].monthsSeen.add(m);
       if(t.date>desc[k].lastDate) desc[k].lastDate=t.date;
-      if(t.isSubscription) desc[k].manuallyMarked=true;
     });});
     const COLS2=getAllCatCols(profile?.customCategories);
+    // Build a fast lookup of declared subscription names (lowercased) so we skip what user already has
+    const declaredNames=new Set((profile?.subscriptions||[]).map(s=>(s.name||"").toLowerCase().trim()));
     return Object.values(desc)
-      .filter(({monthsSeen,category,description,manuallyMarked})=>{
-        // 1) Manually marked — always include
-        if(manuallyMarked) return true;
-        // 2) Categorized as Subscription or Entertainment and seen 2+ months
-        if(monthsSeen.size>=2&&(category==="📱 Subscription"||category==="🎬 Entertainment")) return true;
-        // 3) Merchant name matches a well-known subscription — include even at 1 month
+      .filter(({monthsSeen,category,description})=>{
+        // Skip if user already declared this
+        if(declaredNames.has((description||"").toLowerCase().trim())) return false;
+        // Two routes to suggestion:
+        // 1) Same merchant in 2+ months — strong recurring signal
+        if(monthsSeen.size>=2) return true;
+        // 2) Merchant name matches a well-known service (likely subscription even at 1 occurrence — but only as SUGGESTION, not a "subscription" itself)
         if(SUB_MERCHANT_REGEX.test(description||"")) return true;
         return false;
       })
-      .map(({description,count,amounts,category,monthsSeen,lastDate,manuallyMarked})=>{
+      .map(({description,count,amounts,category,monthsSeen,lastDate})=>{
         const avg=amounts.reduce((a,b)=>a+b,0)/amounts.length;
         const priceChange=amounts[amounts.length-1]>amounts[0]?amounts[amounts.length-1]-amounts[0]:0;
-        return {description,count,amount:avg,category,monthsSeen:monthsSeen.size,lastDate,priceChange,color:COLS2[category]||"#868E96",manuallyMarked};
+        const confidence=monthsSeen.size>=2?"recurring":"likely"; // visible signal of how sure we are
+        return {description,count,amount:avg,category,monthsSeen:monthsSeen.size,lastDate,priceChange,color:COLS2[category]||"#868E96",confidence};
       })
-      .sort((a,b)=>b.amount-a.amount);
-  },[monthlyData,profile?.startMonth,profile?.customCategories]);
+      .sort((a,b)=>{ if(a.confidence!==b.confidence) return a.confidence==="recurring"?-1:1; return b.amount-a.amount; });
+  },[monthlyData,profile?.startMonth,profile?.customCategories,profile?.subscriptions]);
+
+  // Convenience alias for existing UI that referenced "detectedSubscriptions" — now means the declared ones
+  const detectedSubscriptions=declaredSubscriptions.map(s=>({
+    description:s.name,
+    amount:s.monthlyEquiv,
+    category:s.category||"📱 Subscription",
+    monthsSeen:0,
+    lastDate:"",
+    priceChange:0,
+    color:s.color,
+    declared:true,
+    id:s.id,
+    frequency:s.frequency||"monthly"
+  }));
 
   // ── INSIGHTS catalog ───────────────────────────────────────────────────────
   // Each insight: {id, label, description, value, ready} — `ready` means it has enough data to show meaningfully
@@ -1778,6 +1808,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         <SettingsRow icon="🎯" label="Objective" desc={profile.goal?(()=>{const t=profile.goal.type;if(t==="save_more") return "Save more";if(t==="get_out_of_debt") return `Get out of debt${profile.goal.params?.totalDebt?` · ${fmt(profile.goal.params.totalDebt)}`:""}`;if(t==="understand_spending") return "Understand spending";if(t==="spend_less_on") return `Spend less on ${profile.goal.params?.category||"a category"}`;return "Custom";})():"Not set yet"} onClick={()=>setYouSection(youSection==="goal"?null:"goal")}/>
         {youSection==="goal"&&GoalSection()}
         <SettingsRow icon="💰" label="Income & Bills" desc={`${(profile.incomeStreams||[]).length} sources · ${(profile.fixedCommitments||[]).length} bills`} onClick={()=>setSubScreen("income-bills")}/>
+        <SettingsRow icon="📱" label="Subscriptions" desc={(()=>{const n=(profile.subscriptions||[]).length;if(n===0) return "Add Netflix, Spotify, etc.";const total=(profile.subscriptions||[]).reduce((s,x)=>s+subscriptionMonthly(x),0);return `${n} active · ${fmt(total)}/mo`;})()} onClick={()=>setSubScreen("subscriptions")}/>
         <SettingsRow icon="🪙" label="Saving goals" desc={(profile.goals||[]).length>0?`${(profile.goals||[]).length} active`:"No goals set yet"} onClick={()=>setSubScreen("goals")}/>
       </SettingsGroup>
 
@@ -2065,21 +2096,24 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       </div>
     </div>
 
-    {/* Subscriptions — promoted to top of Money for visibility */}
-    {detectedSubscriptions.length>0&&(()=>{
-      const total=detectedSubscriptions.reduce((s,x)=>s+x.amount,0);
-      const flagged=detectedSubscriptions.filter(s=>s.priceChange>0||s.monthsSeen>=4).length;
+    {/* Subscriptions — always visible, even when empty */}
+    {(()=>{
+      const total=declaredSubscriptions.reduce((s,x)=>s+x.monthlyEquiv,0);
+      const count=declaredSubscriptions.length;
+      const suggestN=suggestedSubscriptions.length;
       return <button onClick={()=>setSubScreen("subscriptions")} style={{width:"100%",background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:"16px 18px",marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:count>0?8:0}}>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             <span style={{fontSize:14}}>📱</span>
             <span style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>Subscriptions</span>
-            {flagged>0&&<span style={{fontSize:10,fontWeight:700,color:T.warning,padding:"2px 7px",background:T.warning+"15",border:`1px solid ${T.warning}30`,borderRadius:8}}>{flagged} to check</span>}
+            {suggestN>0&&<span style={{fontSize:10,fontWeight:700,color:T.accent,padding:"2px 7px",background:T.accentSoft,border:`1px solid ${T.accentBorder}`,borderRadius:8}}>{suggestN} found</span>}
           </div>
           <span style={{fontSize:14,color:T.textMuted}}>›</span>
         </div>
-        <div style={{fontSize:24,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif",letterSpacing:-0.5}}>{fmt(total)}<span style={{fontSize:13,color:T.textMuted,fontWeight:500,marginLeft:6}}>/month</span></div>
-        <div style={{fontSize:11,color:T.textSecondary,marginTop:4}}>{detectedSubscriptions.length} active · ~{fmt(total*12)}/yr leaking</div>
+        {count>0?<>
+          <div style={{fontSize:24,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif",letterSpacing:-0.5}}>{fmt(total)}<span style={{fontSize:13,color:T.textMuted,fontWeight:500,marginLeft:6}}>/month</span></div>
+          <div style={{fontSize:11,color:T.textSecondary,marginTop:4}}>{count} active · ~{fmt(total*12)}/yr</div>
+        </>:<div style={{fontSize:12,color:T.textSecondary,lineHeight:1.55,marginTop:6}}>{suggestN>0?`Tap to review ${suggestN} possible subscription${suggestN!==1?"s":""} we found.`:"Tap to add Netflix, Spotify, or any recurring service."}</div>}
       </button>;
     })()}
 
@@ -2616,17 +2650,24 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     {/* — zone spacer — */}
     <div style={{height:16}}/>
 
-    {/* Subscriptions insight — promoted to Home */}
-    {detectedSubscriptions.length>0&&(()=>{
-      const subTotal=detectedSubscriptions.reduce((s,x)=>s+x.amount,0);
+    {/* Subscriptions — Home summary card */}
+    {(declaredSubscriptions.length>0||suggestedSubscriptions.length>0)&&(()=>{
+      const subTotal=declaredSubscriptions.reduce((s,x)=>s+x.monthlyEquiv,0);
       const yearly=subTotal*12;
-      const flagged=detectedSubscriptions.filter(s=>s.priceChange>0||s.monthsSeen>=4);
-      const hasFlag=flagged.length>0;
-      return <button onClick={()=>setSubScreen("subscriptions")} style={{width:"100%",background:T.surface,border:`1px solid ${hasFlag?T.warning+"40":T.border}`,borderRadius:18,padding:"14px 16px",marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer",fontFamily:"inherit",textAlign:"left",display:"flex",alignItems:"center",gap:12}}>
-        <div style={{width:36,height:36,borderRadius:18,background:hasFlag?T.warning+"20":T.accentSoft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{hasFlag?"⚠":"📱"}</div>
+      const hasSuggestions=suggestedSubscriptions.length>0;
+      const noDeclared=declaredSubscriptions.length===0;
+      return <button onClick={()=>setSubScreen("subscriptions")} style={{width:"100%",background:T.surface,border:`1px solid ${hasSuggestions&&noDeclared?T.accent+"60":T.border}`,borderRadius:18,padding:"14px 16px",marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer",fontFamily:"inherit",textAlign:"left",display:"flex",alignItems:"center",gap:12}}>
+        <div style={{width:36,height:36,borderRadius:18,background:T.accentSoft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>📱</div>
         <div style={{flex:1,minWidth:0}}>
-          <div style={{fontSize:13,fontWeight:600,color:T.textPrimary,marginBottom:2}}>{hasFlag?`${flagged.length} subscription${flagged.length!==1?"s":""} worth checking`:`${detectedSubscriptions.length} active subscription${detectedSubscriptions.length!==1?"s":""}`}</div>
-          <div style={{fontSize:11,color:T.textSecondary}}>{fmt(subTotal)}/mo · {fmt(yearly)}/yr</div>
+          {noDeclared
+            ?<>
+              <div style={{fontSize:13,fontWeight:600,color:T.textPrimary,marginBottom:2}}>{suggestedSubscriptions.length} possible subscription{suggestedSubscriptions.length!==1?"s":""} found</div>
+              <div style={{fontSize:11,color:T.textSecondary}}>Tap to review and add</div>
+            </>
+            :<>
+              <div style={{fontSize:13,fontWeight:600,color:T.textPrimary,marginBottom:2}}>{declaredSubscriptions.length} active subscription{declaredSubscriptions.length!==1?"s":""}{hasSuggestions?` · ${suggestedSubscriptions.length} more found`:""}</div>
+              <div style={{fontSize:11,color:T.textSecondary}}>{fmt(subTotal)}/mo · {fmt(yearly)}/yr</div>
+            </>}
         </div>
         <span style={{fontSize:14,color:T.textMuted,flexShrink:0}}>›</span>
       </button>;
@@ -2830,40 +2871,158 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
   // ── SUBSCRIPTIONS detail screen ───────────────────────────────────────────
   const SubscriptionsScreen=()=>{
-    const total=detectedSubscriptions.reduce((s,x)=>s+x.amount,0);
-    const yearly=total*12;
-    const flagged=detectedSubscriptions.filter(s=>s.priceChange>0||s.monthsSeen>=4);
-    return <div>
-      <div style={{textAlign:"center",marginBottom:22}}>
-        <MicroLabel style={{marginBottom:8}}>YOU'RE SPENDING</MicroLabel>
-        <div style={{fontSize:48,fontWeight:700,color:T.textPrimary,letterSpacing:-1.5,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>{fmt(total)}<span style={{fontSize:18,color:T.textMuted,fontWeight:500}}>/mo</span></div>
-        <div style={{fontSize:13,color:T.textSecondary,marginTop:6}}>That's <span style={{fontWeight:700,color:T.textPrimary}}>{fmt(yearly)}</span> a year</div>
-      </div>
+    const list=declaredSubscriptions;
+    const monthlyTotal=list.reduce((s,x)=>s+x.monthlyEquiv,0);
+    const yearly=monthlyTotal*12;
 
-      {flagged.length>0&&<div style={{background:T.warning+"10",border:`1px solid ${T.warning}30`,borderRadius:18,padding:"14px 16px",marginBottom:14}}>
-        <div style={{fontSize:13,fontWeight:700,color:T.warning,marginBottom:6}}>⚠ Worth checking</div>
-        <div style={{fontSize:12,color:T.textSecondary,lineHeight:1.5}}>{flagged.length} subscription{flagged.length!==1?"s":""} {flagged.some(f=>f.priceChange>0)?"had a price increase":"running a while now"}.</div>
+    const addSubscription=draft=>{
+      const next=[...(profile.subscriptions||[]),{id:`sub${Date.now()}`,...draft}];
+      saveProfile({...profile,subscriptions:next});
+      showToast("✓ Subscription added");
+    };
+    const updateSubscription=(id,draft)=>{
+      const next=(profile.subscriptions||[]).map(s=>s.id===id?{...s,...draft}:s);
+      saveProfile({...profile,subscriptions:next});
+      showToast("✓ Subscription updated");
+    };
+    const deleteSubscription=id=>{
+      if(!confirm("Delete this subscription?")) return;
+      const next=(profile.subscriptions||[]).filter(s=>s.id!==id);
+      saveProfile({...profile,subscriptions:next});
+      showToast("Subscription deleted");
+    };
+    const acceptSuggestion=sug=>{
+      // Convert suggestion to a declared subscription
+      addSubscription({
+        name:sug.description,
+        amount:sug.amount,
+        frequency:"monthly",
+        category:sug.category||"📱 Subscription"
+      });
+    };
+
+    // Editor view
+    if(subEditor){
+      const isNew=subEditor==="new";
+      const existing=isNew?null:list.find(s=>s.id===subEditor);
+      const d=subDraft||{name:existing?.name||"",amount:existing?.amount||"",frequency:existing?.frequency||"monthly",category:existing?.category||"📱 Subscription"};
+      const setD=u=>setSubDraft(typeof u==="function"?u(d):u);
+      const inpS={padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"inherit",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"};
+      const valid=d.name.trim()&&parseFloat(d.amount)>0;
+      const handleSave=()=>{
+        if(!valid) return;
+        const payload={name:d.name.trim(),amount:parseFloat(d.amount),frequency:d.frequency,category:d.category};
+        if(isNew) addSubscription(payload); else updateSubscription(subEditor,payload);
+        setSubEditor(null); setSubDraft(null);
+      };
+      return <div>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:18}}>
+          <button onClick={()=>{setSubEditor(null);setSubDraft(null);}} style={{background:"none",border:"none",color:T.textSecondary,fontSize:20,cursor:"pointer",padding:"4px 8px",fontFamily:"inherit"}}>‹</button>
+          <div style={{fontSize:16,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>{isNew?"Add subscription":"Edit subscription"}</div>
+        </div>
+        <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:"16px 18px",marginBottom:14,boxShadow:T.cardShadow,display:"flex",flexDirection:"column",gap:12}}>
+          <div>
+            <div style={{fontSize:10,color:T.textMuted,marginBottom:4,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.5}}>NAME</div>
+            <input type="text" placeholder="e.g. Netflix" value={d.name} onChange={e=>setD({...d,name:e.target.value})} style={inpS} autoFocus/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div>
+              <div style={{fontSize:10,color:T.textMuted,marginBottom:4,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.5}}>AMOUNT</div>
+              <input type="number" inputMode="decimal" placeholder="0.00" value={d.amount} onChange={e=>setD({...d,amount:e.target.value})} style={{...inpS,fontFamily:"'DM Mono'",fontWeight:600}}/>
+            </div>
+            <div>
+              <div style={{fontSize:10,color:T.textMuted,marginBottom:4,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.5}}>FREQUENCY</div>
+              <select value={d.frequency} onChange={e=>setD({...d,frequency:e.target.value})} style={inpS}>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+                <option value="quarterly">Quarterly</option>
+                <option value="yearly">Yearly</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <div style={{fontSize:10,color:T.textMuted,marginBottom:4,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.5}}>CATEGORY</div>
+            <select value={d.category} onChange={e=>setD({...d,category:e.target.value})} style={inpS}>
+              {[...CATS,...FIXED_CATS].map(c=><option key={c}>{c}</option>)}
+            </select>
+          </div>
+          {valid&&parseFloat(d.amount)>0&&d.frequency!=="monthly"&&<div style={{padding:"8px 10px",background:T.accentSoft,borderRadius:8,fontSize:11,color:T.textSecondary,textAlign:"center"}}>
+            That's <span style={{fontFamily:"'DM Mono'",fontWeight:700,color:T.accent}}>{fmt(subscriptionMonthly({amount:parseFloat(d.amount),frequency:d.frequency}))}</span> per month
+          </div>}
+        </div>
+        <div style={{display:"flex",gap:10}}>
+          <Btn variant="ghost" size="sm" onClick={()=>{setSubEditor(null);setSubDraft(null);}}>Cancel</Btn>
+          <Btn size="sm" onClick={handleSave} disabled={!valid}>{isNew?"Add":"Save changes"}</Btn>
+        </div>
+        {!isNew&&<button onClick={()=>{deleteSubscription(subEditor);setSubEditor(null);setSubDraft(null);}} style={{width:"100%",marginTop:10,padding:"10px",background:"transparent",border:"none",color:T.negative,fontFamily:"inherit",fontSize:12,cursor:"pointer"}}>Delete subscription</button>}
+      </div>;
+    }
+
+    // List view (default)
+    const quickStarters=["Netflix","Spotify","Apple iCloud","YouTube Premium","Disney+","ChatGPT","Claude","Adobe","Notion"];
+    return <div>
+      {/* Summary */}
+      {list.length>0?<div style={{textAlign:"center",marginBottom:22}}>
+        <MicroLabel style={{marginBottom:8}}>YOU'RE SPENDING</MicroLabel>
+        <div style={{fontSize:48,fontWeight:700,color:T.textPrimary,letterSpacing:-1.5,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>{fmt(monthlyTotal)}<span style={{fontSize:18,color:T.textMuted,fontWeight:500}}>/mo</span></div>
+        <div style={{fontSize:13,color:T.textSecondary,marginTop:6}}>That's <span style={{fontWeight:700,color:T.textPrimary}}>{fmt(yearly)}</span> a year</div>
+      </div>:<div style={{padding:"22px 18px",textAlign:"center",marginBottom:14}}>
+        <div style={{fontSize:32,marginBottom:10}}>📱</div>
+        <div style={{fontSize:15,fontWeight:700,color:T.textPrimary,marginBottom:6,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>No subscriptions yet</div>
+        <div style={{fontSize:12,color:T.textSecondary,lineHeight:1.55,maxWidth:280,margin:"0 auto"}}>Track what you pay each month for streaming, software, gym, anything that recurs.</div>
       </div>}
 
-      <MicroLabel style={{marginBottom:10,marginLeft:4}}>ACTIVE SUBSCRIPTIONS</MicroLabel>
-      <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,overflow:"hidden",marginBottom:14,boxShadow:T.cardShadow}}>
-        {detectedSubscriptions.length===0&&<div style={{padding:"32px 20px",textAlign:"center",fontSize:13,color:T.textMuted}}>No subscriptions detected yet.<br/>Import 2+ months of statements to see recurring charges.</div>}
-        {detectedSubscriptions.map((s,i)=>{
-          const flags=[]; if(s.priceChange>0) flags.push({col:T.warning,text:`+${fmt(s.priceChange)} vs first charge`});
-          if(s.monthsSeen>=4) flags.push({col:T.textMuted,text:`Active ${s.monthsSeen} months`});
-          return <div key={i} style={{padding:"14px 16px",borderTop:i?`1px solid ${T.borderSoft}`:"none",display:"flex",alignItems:"center",gap:12}}>
-            <div style={{width:40,height:40,borderRadius:12,background:s.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{s.category?.split(" ")[0]||"📱"}</div>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:14,fontWeight:600,color:T.textPrimary,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{s.description}</div>
-              <div style={{fontSize:11,color:T.textMuted,marginTop:2}}>~{fmt(s.amount*12)}/yr</div>
-              {flags.map((f,j)=><div key={j} style={{fontSize:10,color:f.col,marginTop:2,fontWeight:600}}>{f.text}</div>)}
-            </div>
-            <div style={{fontFamily:"'DM Mono'",fontSize:14,fontWeight:700,color:T.textPrimary}}>{fmt(s.amount)}</div>
-          </div>;
-        })}
-      </div>
+      {/* Active list */}
+      {list.length>0&&<>
+        <MicroLabel style={{marginBottom:10,marginLeft:4}}>YOUR SUBSCRIPTIONS</MicroLabel>
+        <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,overflow:"hidden",marginBottom:14,boxShadow:T.cardShadow}}>
+          {list.map((s,i)=>{
+            return <div key={s.id} onClick={()=>{setSubEditor(s.id);setSubDraft(null);}} style={{padding:"14px 16px",borderTop:i?`1px solid ${T.borderSoft}`:"none",display:"flex",alignItems:"center",gap:12,cursor:"pointer"}}>
+              <div style={{width:40,height:40,borderRadius:12,background:s.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{(s.category||"📱").split(" ")[0]||"📱"}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:14,fontWeight:600,color:T.textPrimary,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{s.name}</div>
+                <div style={{fontSize:11,color:T.textMuted,marginTop:2}}>{s.frequency||"monthly"} · ~{fmt(s.monthlyEquiv*12)}/yr</div>
+              </div>
+              <div style={{textAlign:"right",flexShrink:0}}>
+                <div style={{fontFamily:"'DM Mono'",fontSize:14,fontWeight:700,color:T.textPrimary}}>{fmt(s.amount)}</div>
+                {s.frequency&&s.frequency!=="monthly"&&<div style={{fontFamily:"'DM Mono'",fontSize:10,color:T.textMuted}}>{fmt(s.monthlyEquiv)}/mo</div>}
+              </div>
+            </div>;
+          })}
+        </div>
+      </>}
 
-      {detectedSubscriptions.length>0&&<div style={{padding:"12px 14px",fontSize:11,color:T.textMuted,textAlign:"center",lineHeight:1.5}}>Subscriptions are auto-detected from your statements based on recurring charges with similar amounts each month.</div>}
+      {/* Add button */}
+      <button onClick={()=>{setSubEditor("new");setSubDraft(null);}} style={{width:"100%",padding:"14px",background:T.accent,border:"none",borderRadius:14,color:"#fff",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer",marginBottom:14,boxShadow:`0 4px 12px ${T.accent}40`}}>+ Add subscription</button>
+
+      {/* Quick-add chips for new users */}
+      {list.length===0&&<div style={{marginBottom:14}}>
+        <div style={{fontSize:10,color:T.textMuted,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.5,marginBottom:8,marginLeft:4}}>OR QUICK-ADD</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+          {quickStarters.map(name=><button key={name} onClick={()=>{setSubEditor("new");setSubDraft({name,amount:"",frequency:"monthly",category:"📱 Subscription"});}} style={{padding:"6px 12px",borderRadius:14,border:`1px solid ${T.border}`,background:T.surface,color:T.textPrimary,fontSize:12,fontWeight:500,cursor:"pointer",fontFamily:"inherit"}}>{name}</button>)}
+        </div>
+      </div>}
+
+      {/* Suggestions from detection */}
+      {suggestedSubscriptions.length>0&&<>
+        <MicroLabel style={{marginBottom:10,marginLeft:4}}>💡 POSSIBLE SUBSCRIPTIONS</MicroLabel>
+        <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,overflow:"hidden",marginBottom:14,boxShadow:T.cardShadow}}>
+          {suggestedSubscriptions.slice(0,8).map((sug,i)=>{
+            return <div key={i} style={{padding:"14px 16px",borderTop:i?`1px solid ${T.borderSoft}`:"none",display:"flex",alignItems:"center",gap:12}}>
+              <div style={{width:36,height:36,borderRadius:10,background:(sug.color||"#868E96")+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{sug.category?.split(" ")[0]||"📱"}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:600,color:T.textPrimary,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{sug.description}</div>
+                <div style={{fontSize:10,color:T.textMuted,marginTop:2,fontFamily:"'DM Mono'"}}>
+                  {sug.confidence==="recurring"?`${sug.monthsSeen} months · ${fmt(sug.amount)}`:`Seen once · ${fmt(sug.amount)} · likely subscription`}
+                </div>
+              </div>
+              <button onClick={()=>acceptSuggestion(sug)} style={{padding:"6px 12px",borderRadius:12,background:T.accentSoft,border:`1px solid ${T.accent}`,color:T.accent,fontFamily:"inherit",fontSize:11,fontWeight:700,cursor:"pointer",flexShrink:0}}>+ Add</button>
+            </div>;
+          })}
+        </div>
+      </>}
+
+      <div style={{fontSize:10,color:T.textMuted,textAlign:"center",lineHeight:1.5,padding:"4px 12px"}}>Subscriptions count toward your monthly spending. We auto-suggest based on recurring charges in your statements.</div>
     </div>;
   };
 
@@ -2904,7 +3063,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       {subScreen&&<div style={{position:"fixed",inset:0,background:T.bg,zIndex:200,overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
         <div style={{maxWidth:580,margin:"0 auto",padding:"8px 18px 24px"}}>
           <div style={{display:"flex",alignItems:"center",gap:8,padding:"12px 0 18px"}}>
-            <button onClick={()=>{setSubScreen(null);setAddMode("choose");setIbDraft(null);setGoalsDraft(null);}} style={{background:"none",border:"none",fontSize:24,color:T.textSecondary,cursor:"pointer",padding:"4px 8px",fontFamily:"inherit"}}>‹</button>
+            <button onClick={()=>{setSubScreen(null);setAddMode("choose");setIbDraft(null);setGoalsDraft(null);setSubEditor(null);setSubDraft(null);}} style={{background:"none",border:"none",fontSize:24,color:T.textSecondary,cursor:"pointer",padding:"4px 8px",fontFamily:"inherit"}}>‹</button>
             <div style={{fontSize:18,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>
               {subScreen==="add"?"Add":subScreen==="upload"?"Upload statement":subScreen==="review"?"Quick review":subScreen==="subscriptions"?"Subscriptions":subScreen==="income-bills"?"Income & Bills":subScreen==="goals"?"Goals":subScreen==="theme"?"Theme":subScreen==="advanced"?"Advanced":subScreen==="search"?"Search":subScreen==="insights"?"Insights":""}
             </div>
@@ -2960,15 +3119,18 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
             {lbl}
           </button>;
         })}
-        {/* Floating + button with permanent label + first-time coachmark */}
-        <div style={{position:"absolute",right:18,top:-26,display:"flex",flexDirection:"column",alignItems:"center"}}>
-          {showAddCoachmark&&<div onClick={dismissAddCoachmark} style={{position:"absolute",right:64,top:8,background:T.textPrimary,color:T.bg,padding:"10px 14px",borderRadius:12,fontSize:12,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",boxShadow:"0 6px 20px rgba(0,0,0,0.25)",zIndex:60,fontFamily:"inherit",lineHeight:1.4,maxWidth:200,whiteSpace:"normal",textAlign:"left"}}>
+        {/* Pill-shaped "+ Add Transactions" button with first-time coachmark above */}
+        <div style={{position:"absolute",right:18,top:-22,display:"flex",flexDirection:"column",alignItems:"flex-end"}}>
+          {showAddCoachmark&&<div onClick={dismissAddCoachmark} style={{position:"absolute",right:0,top:-72,background:T.textPrimary,color:T.bg,padding:"10px 14px",borderRadius:12,fontSize:12,fontWeight:600,cursor:"pointer",boxShadow:"0 6px 20px rgba(0,0,0,0.25)",zIndex:60,fontFamily:"inherit",lineHeight:1.4,maxWidth:220,textAlign:"left"}}>
             <div style={{marginBottom:2}}>👋 Start here</div>
             <div style={{fontSize:11,fontWeight:500,opacity:0.85}}>Upload a statement or add a transaction</div>
-            <div style={{position:"absolute",right:-6,top:14,width:0,height:0,borderTop:"6px solid transparent",borderBottom:"6px solid transparent",borderLeft:`6px solid ${T.textPrimary}`}}/>
+            {/* Downward-pointing arrow */}
+            <div style={{position:"absolute",right:24,bottom:-6,width:0,height:0,borderLeft:"6px solid transparent",borderRight:"6px solid transparent",borderTop:`6px solid ${T.textPrimary}`}}/>
           </div>}
-          <button onClick={()=>{setAddMode("choose");setSubScreen("add");dismissAddCoachmark();}} style={{width:56,height:56,borderRadius:28,background:T.accent,border:`4px solid ${T.bg}`,color:"#fff",fontSize:28,fontWeight:300,cursor:"pointer",boxShadow:`0 6px 20px ${T.accent}55`,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1,paddingBottom:4,fontFamily:"inherit"}}>+</button>
-          <div style={{fontSize:9,fontWeight:700,color:T.accent,marginTop:2,letterSpacing:0.3,fontFamily:"'DM Mono',monospace",textTransform:"uppercase",whiteSpace:"nowrap"}}>Add Transactions</div>
+          <button onClick={()=>{setAddMode("choose");setSubScreen("add");dismissAddCoachmark();}} style={{height:46,padding:"0 18px",borderRadius:23,background:T.accent,border:`3px solid ${T.bg}`,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",boxShadow:`0 6px 20px ${T.accent}55`,display:"flex",alignItems:"center",gap:8,fontFamily:"inherit",letterSpacing:0.2,whiteSpace:"nowrap"}}>
+            <span style={{fontSize:20,fontWeight:300,lineHeight:1,marginTop:-2}}>+</span>
+            <span>Add Transactions</span>
+          </button>
         </div>
       </div>
     </div>
