@@ -279,8 +279,9 @@ function TxDetailModal({tx,month,monthLabel,allCats,fmt,onSave,onArchive,onClose
     date:tx.date||"",
     notes:tx.notes||"",
     split:tx.split?{with:tx.split.with||"",share:tx.split.share||0.5}:null,
+    isSubscription:!!tx.isSubscription,
   });
-  const dirty=d.description!==(tx.description||"")||parseFloat(d.amount)!==tx.amount||d.category!==tx.category||d.date!==tx.date||(d.notes||"")!==(tx.notes||"")||JSON.stringify(d.split||null)!==JSON.stringify(tx.split||null);
+  const dirty=d.description!==(tx.description||"")||parseFloat(d.amount)!==tx.amount||d.category!==tx.category||d.date!==tx.date||(d.notes||"")!==(tx.notes||"")||JSON.stringify(d.split||null)!==JSON.stringify(tx.split||null)||d.isSubscription!==!!tx.isSubscription;
   const save=()=>{
     const amtN=parseFloat(d.amount);
     if(!d.description.trim()||isNaN(amtN)) return;
@@ -291,6 +292,7 @@ function TxDetailModal({tx,month,monthLabel,allCats,fmt,onSave,onArchive,onClose
     } else {
       delete out.split;
     }
+    if(d.isSubscription) out.isSubscription=true; else delete out.isSubscription;
     onSave(out); onClose();
   };
   const inpS={padding:"10px 12px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,color:T.textPrimary,fontFamily:"inherit",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"};
@@ -324,6 +326,16 @@ function TxDetailModal({tx,month,monthLabel,allCats,fmt,onSave,onArchive,onClose
       <div>
         <div style={{fontSize:10,color:T.textMuted,marginBottom:4,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.5}}>NOTE <span style={{color:T.textMuted,fontWeight:400,letterSpacing:0,textTransform:"none"}}>(optional)</span></div>
         <textarea value={d.notes} onChange={e=>setD({...d,notes:e.target.value})} placeholder="Add a note — what was this for, who you were with…" rows={3} style={{...inpS,resize:"vertical",minHeight:60,fontFamily:"inherit"}}/>
+      </div>
+      {/* Mark as subscription */}
+      <div style={{padding:"10px 12px",background:d.isSubscription?T.accentSoft:T.surface2,border:`1px solid ${d.isSubscription?T.accentBorder:T.borderSoft}`,borderRadius:12,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:14}}>📱</span>
+          <span style={{fontSize:12,fontWeight:600,color:T.textPrimary}}>Mark as subscription</span>
+        </div>
+        <div onClick={()=>setD({...d,isSubscription:!d.isSubscription})} style={{width:36,height:22,borderRadius:11,background:d.isSubscription?T.accent:T.borderMid,padding:2,boxSizing:"border-box",cursor:"pointer",transition:"background .15s",flexShrink:0,position:"relative"}}>
+          <div style={{width:18,height:18,borderRadius:9,background:"#fff",transform:`translateX(${d.isSubscription?14:0}px)`,transition:"transform .15s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}/>
+        </div>
       </div>
       {/* Split with */}
       <div style={{padding:"12px 12px",background:d.split?T.accentSoft:T.surface2,border:`1px solid ${d.split?T.accentBorder:T.borderSoft}`,borderRadius:12}}>
@@ -509,7 +521,7 @@ function Onboarding({onComplete}){
     ];
     return <Wrap>
       <div>
-        <div style={{fontSize:24,fontWeight:800,color:T.textPrimary,letterSpacing:-0.6,marginBottom:6,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>What's your main goal?</div>
+        <div style={{fontSize:24,fontWeight:800,color:T.textPrimary,letterSpacing:-0.6,marginBottom:6,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>What's your main objective?</div>
         <div style={{fontSize:13,color:T.textSecondary,marginBottom:18}}>We'll tune your dashboard to show what matters most. You can change this later.</div>
         <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:18}}>
           {GOALS.map(g=>{
@@ -663,6 +675,19 @@ export default function App(){
   const [trendCats,setTrendCats]=useState([]);
   // Money tab transactions pagination
   const [txPage,setTxPage]=useState(1);
+  // Money tab — collapsible sections (default all open)
+  const [moneyCollapsed,setMoneyCollapsed]=useState({income:false,bills:false,recent:false});
+  const toggleMoneySection=key=>setMoneyCollapsed(c=>({...c,[key]:!c[key]}));
+  // First-time + button coachmark — shown once per device
+  const [showAddCoachmark,setShowAddCoachmark]=useState(false);
+  useEffect(()=>{
+    if(!profile?.onboarded) return;
+    try{ if(!localStorage.getItem("seenAddCoachmark")) setShowAddCoachmark(true); }catch(e){}
+  },[profile?.onboarded]);
+  const dismissAddCoachmark=()=>{
+    setShowAddCoachmark(false);
+    try{ localStorage.setItem("seenAddCoachmark","1"); }catch(e){}
+  };
   // VarIncomeRow drafts and flash state — keyed by stream id
   const [varDrafts,setVarDrafts]=useState({});
   const [varFlash,setVarFlash]=useState({});
@@ -777,21 +802,31 @@ export default function App(){
   const detectedSubscriptions=useMemo(()=>{
     const months=Object.keys(monthlyData).filter(m=>!profile?.startMonth||m>=profile.startMonth).sort();
     if(months.length<1) return [];
+    // Well-known subscription merchants — strong signal, even on single occurrence
+    const SUB_MERCHANT_REGEX=/netflix|spotify|prime video|youtube premium|youtube music|apple|disney\+?|disney plus|hbo|hulu|paramount|adobe|notion|figma|canva|github|chatgpt|claude|openai|anthropic|dropbox|microsoft 365|office 365|google one|icloud|expressvpn|nordvpn|surfshark|setapp|1password|grammarly|duolingo|audible|tidal|deezer|patreon|substack|medium|coursera|udemy|linkedin premium|zoom|slack|gusto|xero|quickbooks|asana|trello|miro|loom|hubspot|mailchimp|squarespace|wordpress|cloudflare/i;
     const desc={};
     months.forEach(m=>{(monthlyData[m]?.txs||[]).forEach(t=>{
       const k=t.description?.toLowerCase().trim(); if(!k) return;
-      if(!desc[k]) desc[k]={count:0,amounts:[],description:t.description,category:t.category,monthsSeen:new Set(),lastDate:""};
+      if(!desc[k]) desc[k]={count:0,amounts:[],description:t.description,category:t.category,monthsSeen:new Set(),lastDate:"",manuallyMarked:false};
       desc[k].count++; desc[k].amounts.push(Math.abs(t.amount)); desc[k].monthsSeen.add(m);
       if(t.date>desc[k].lastDate) desc[k].lastDate=t.date;
+      if(t.isSubscription) desc[k].manuallyMarked=true;
     });});
-    const COLS=getAllCatCols(profile?.customCategories);
+    const COLS2=getAllCatCols(profile?.customCategories);
     return Object.values(desc)
-      .filter(({monthsSeen,category})=>monthsSeen.size>=2&&(category==="📱 Subscription"||category==="🎬 Entertainment"))
-      .map(({description,count,amounts,category,monthsSeen,lastDate})=>{
+      .filter(({monthsSeen,category,description,manuallyMarked})=>{
+        // 1) Manually marked — always include
+        if(manuallyMarked) return true;
+        // 2) Categorized as Subscription or Entertainment and seen 2+ months
+        if(monthsSeen.size>=2&&(category==="📱 Subscription"||category==="🎬 Entertainment")) return true;
+        // 3) Merchant name matches a well-known subscription — include even at 1 month
+        if(SUB_MERCHANT_REGEX.test(description||"")) return true;
+        return false;
+      })
+      .map(({description,count,amounts,category,monthsSeen,lastDate,manuallyMarked})=>{
         const avg=amounts.reduce((a,b)=>a+b,0)/amounts.length;
-        const stdDev=Math.sqrt(amounts.reduce((s,a)=>s+(a-avg)**2,0)/amounts.length);
         const priceChange=amounts[amounts.length-1]>amounts[0]?amounts[amounts.length-1]-amounts[0]:0;
-        return {description,count,amount:avg,category,monthsSeen:monthsSeen.size,lastDate,priceChange,color:COLS[category]||"#868E96"};
+        return {description,count,amount:avg,category,monthsSeen:monthsSeen.size,lastDate,priceChange,color:COLS2[category]||"#868E96",manuallyMarked};
       })
       .sort((a,b)=>b.amount-a.amount);
   },[monthlyData,profile?.startMonth,profile?.customCategories]);
@@ -1740,17 +1775,14 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       <SettingsGroup title="Profile">
         <SettingsRow icon="👤" label="Identity" desc={`${profile.name||"Anonymous"}${profile.occupation?` · ${profile.occupation}`:""} · ${profile.currency}`} onClick={()=>setYouSection(youSection==="identity"?null:"identity")}/>
         {youSection==="identity"&&IdentitySection()}
-        <SettingsRow icon="🎯" label="Goal" desc={profile.goal?(()=>{const t=profile.goal.type;if(t==="save_more") return "Save more";if(t==="get_out_of_debt") return `Get out of debt${profile.goal.params?.totalDebt?` · ${fmt(profile.goal.params.totalDebt)}`:""}`;if(t==="understand_spending") return "Understand spending";if(t==="spend_less_on") return `Spend less on ${profile.goal.params?.category||"a category"}`;return "Custom";})():"Not set yet"} onClick={()=>setYouSection(youSection==="goal"?null:"goal")}/>
+        <SettingsRow icon="🎯" label="Objective" desc={profile.goal?(()=>{const t=profile.goal.type;if(t==="save_more") return "Save more";if(t==="get_out_of_debt") return `Get out of debt${profile.goal.params?.totalDebt?` · ${fmt(profile.goal.params.totalDebt)}`:""}`;if(t==="understand_spending") return "Understand spending";if(t==="spend_less_on") return `Spend less on ${profile.goal.params?.category||"a category"}`;return "Custom";})():"Not set yet"} onClick={()=>setYouSection(youSection==="goal"?null:"goal")}/>
         {youSection==="goal"&&GoalSection()}
         <SettingsRow icon="💰" label="Income & Bills" desc={`${(profile.incomeStreams||[]).length} sources · ${(profile.fixedCommitments||[]).length} bills`} onClick={()=>setSubScreen("income-bills")}/>
         <SettingsRow icon="🪙" label="Saving goals" desc={(profile.goals||[]).length>0?`${(profile.goals||[]).length} active`:"No goals set yet"} onClick={()=>setSubScreen("goals")}/>
       </SettingsGroup>
 
-      <SettingsGroup title="Appearance">
-        <SettingsRow icon="🎨" label="Theme" desc={`${LIGHT_PRESETS.concat(DARK_PRESETS).find(p=>p.accent===youAccent&&p.bg===youBg)?.name||"Custom"}`} onClick={()=>setSubScreen("theme")}/>
-      </SettingsGroup>
-
       <SettingsGroup title="Personalisation">
+        <SettingsRow icon="🎨" label="Theme" desc={`${LIGHT_PRESETS.concat(DARK_PRESETS).find(p=>p.accent===youAccent&&p.bg===youBg)?.name||"Custom"}`} onClick={()=>setSubScreen("theme")}/>
         <SettingsRow icon="✨" label="Insights" desc={(()=>{const n=(profile.insightPrefs||[]).length;return n===0?"None enabled":n===1?"1 enabled":`${n} enabled`;})()} onClick={()=>setSubScreen("insights")}/>
       </SettingsGroup>
 
@@ -2082,25 +2114,33 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
     {/* Income card */}
     {(incomeRows.length>0||oneoffEntries.length>0)&&<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:"16px 18px",marginBottom:12,boxShadow:T.cardShadow}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-        <div style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>Income</div>
+      <div onClick={()=>toggleMoneySection("income")} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:moneyCollapsed.income?0:6,cursor:"pointer",userSelect:"none"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>Income</div>
+          <span style={{fontSize:10,color:T.textMuted,transition:"transform .15s",display:"inline-block",transform:moneyCollapsed.income?"rotate(-90deg)":"rotate(0deg)"}}>▾</span>
+        </div>
         <div style={{fontSize:14,fontFamily:"'DM Mono'",fontWeight:700,color:T.positive}}>{fmt(incTotal)}</div>
       </div>
-      {incomeRows.map(({stream,amount})=>{
-        if(stream.type==="fixed") return <FixedIncomeRow key={stream.id} stream={stream} amount={amount}/>;
-        return <VarIncomeRow key={stream.id} stream={stream} amount={amount}/>;
-      })}
-      {oneoffEntries.map(o=><OneoffRow key={o.id} entry={o}/>)}
-      {AddOneoffForm()}
+      {!moneyCollapsed.income&&<>
+        {incomeRows.map(({stream,amount})=>{
+          if(stream.type==="fixed") return <FixedIncomeRow key={stream.id} stream={stream} amount={amount}/>;
+          return <VarIncomeRow key={stream.id} stream={stream} amount={amount}/>;
+        })}
+        {oneoffEntries.map(o=><OneoffRow key={o.id} entry={o}/>)}
+        {AddOneoffForm()}
+      </>}
     </div>}
 
     {/* Bills card */}
     {monthFixed.length>0&&<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:"16px 18px",marginBottom:12,boxShadow:T.cardShadow}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-        <div style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>Bills</div>
+      <div onClick={()=>toggleMoneySection("bills")} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:moneyCollapsed.bills?0:6,cursor:"pointer",userSelect:"none"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>Bills</div>
+          <span style={{fontSize:10,color:T.textMuted,transition:"transform .15s",display:"inline-block",transform:moneyCollapsed.bills?"rotate(-90deg)":"rotate(0deg)"}}>▾</span>
+        </div>
         <div style={{fontSize:14,fontFamily:"'DM Mono'",fontWeight:700,color:T.bills}}>{fmt(fixedTotal)}</div>
       </div>
-      {monthFixed.map(c=><div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:`1px solid ${T.borderSoft}`}}>
+      {!moneyCollapsed.bills&&monthFixed.map(c=><div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:`1px solid ${T.borderSoft}`}}>
         <div>
           <div style={{fontSize:13,fontWeight:500,color:T.textPrimary}}>{c.name}</div>
           {c.endMonth&&<div style={{fontSize:10,color:T.textMuted}}>until {monthLabelShort(c.endMonth)}</div>}
@@ -2111,10 +2151,14 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
 
     {/* Recent transactions */}
     {txs.length>0&&<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:"16px 0",marginBottom:12,boxShadow:T.cardShadow}}>
-      <div style={{padding:"0 18px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>Recent transactions</div>
+      <div onClick={()=>toggleMoneySection("recent")} style={{padding:"0 18px 12px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",userSelect:"none"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{fontSize:13,fontWeight:600,color:T.textPrimary}}>Recent transactions</div>
+          <span style={{fontSize:10,color:T.textMuted,transition:"transform .15s",display:"inline-block",transform:moneyCollapsed.recent?"rotate(-90deg)":"rotate(0deg)"}}>▾</span>
+        </div>
         <span style={{fontSize:11,color:T.textMuted}}>{filteredTxs.length}</span>
       </div>
+      {!moneyCollapsed.recent&&<>
       {/* Category filter */}
       {byCat.length>1&&<div style={{padding:"0 14px 10px",display:"flex",gap:6,overflowX:"auto"}}>
         {["All",...byCat.map(([c])=>c)].map(c=><button key={c} onClick={()=>setCatFilter(c)} style={{padding:"6px 12px",borderRadius:16,border:`1px solid ${catFilter===c?T.accent:T.border}`,background:catFilter===c?T.accentSoft:"transparent",color:catFilter===c?T.accent:T.textMuted,fontSize:11,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit",flexShrink:0,fontWeight:catFilter===c?700:500}}>{c==="All"?"All":c.split(" ")[0]}</button>)}
@@ -2152,9 +2196,8 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           </div>}
         </>;
       })()}
+      </>}
     </div>}
-
-    {/* Empty state */}
     {txs.length===0&&incomeRows.length===0&&<div onClick={()=>{setAddMode("choose");setSubScreen("add");}} style={{background:T.surface,border:`2px dashed ${T.border}`,borderRadius:18,padding:"32px 20px",textAlign:"center",cursor:"pointer"}}>
       <div style={{fontSize:32,marginBottom:10}}>💰</div>
       <div style={{fontSize:15,fontWeight:700,color:T.textPrimary,marginBottom:6,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>Nothing here yet</div>
@@ -2163,12 +2206,9 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     </div>}
   </div>;
   const HomeContent=()=><div style={{padding:"8px 18px 24px",color:T.textPrimary}}>
-    {/* Top — APRIL 2026, Hey Alex, avatar + month picker */}
+    {/* Top — Hey [name], month picker, avatar */}
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 0 22px"}}>
-      <div>
-        <div style={{fontSize:11,color:T.textMuted,fontWeight:500,letterSpacing:0.3,marginBottom:2}}>{monthLabelUpper(selectedMonth)}</div>
-        <div style={{fontSize:16,fontWeight:600,color:T.textPrimary}}>Hey, {firstName}</div>
-      </div>
+      <div style={{fontSize:18,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>Hey, {firstName}</div>
       <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
         <MonthPicker value={selectedMonth} onChange={setSelectedMonth} startMonth={profile.startMonth}/>
         <div onClick={()=>setTab("you")} style={{cursor:"pointer",flexShrink:0}}>
@@ -2178,6 +2218,21 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         </div>
       </div>
     </div>
+
+    {/* Get Started — new user empty state (no transactions across all months yet) */}
+    {!previewMode&&Object.values(monthlyData).every(md=>(md.txs||[]).length===0)&&<div style={{padding:"40px 16px 30px",textAlign:"center"}}>
+      <div style={{display:"inline-flex",width:80,height:80,borderRadius:40,background:T.accentSoft,color:T.accent,alignItems:"center",justifyContent:"center",fontSize:42,marginBottom:18}}>👋</div>
+      <div style={{fontSize:24,fontWeight:800,color:T.textPrimary,letterSpacing:-0.5,marginBottom:8,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>Welcome, {firstName}!</div>
+      <div style={{fontSize:14,color:T.textSecondary,lineHeight:1.55,marginBottom:24,maxWidth:300,margin:"0 auto 24px"}}>Add some transactions to see your full money picture come together.</div>
+      <div style={{display:"flex",flexDirection:"column",gap:10,maxWidth:300,margin:"0 auto"}}>
+        <button onClick={()=>{setAddMode("choose");setSubScreen("upload");dismissAddCoachmark();}} style={{padding:"14px 18px",background:T.accent,border:"none",borderRadius:14,color:"#fff",fontFamily:"inherit",fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:`0 4px 16px ${T.accent}40`}}>📄 Upload first statement</button>
+        <button onClick={()=>{setAddMode("quick");setSubScreen("add");dismissAddCoachmark();}} style={{padding:"14px 18px",background:"transparent",border:`1.5px solid ${T.border}`,borderRadius:14,color:T.textPrimary,fontFamily:"inherit",fontSize:14,fontWeight:600,cursor:"pointer"}}>✏️ Add a transaction manually</button>
+      </div>
+      <div style={{marginTop:20,fontSize:11,color:T.textMuted,lineHeight:1.5}}>Or set up income & bills in <span onClick={()=>setTab("you")} style={{color:T.accent,fontWeight:700,cursor:"pointer"}}>You</span> first</div>
+    </div>}
+
+    {/* The rest of Home only renders if there's data OR user is in preview mode */}
+    {(previewMode||Object.values(monthlyData).some(md=>(md.txs||[]).length>0))&&<>
 
     {/* Viewing past month banner */}
     {selectedMonth!==currentMonth()&&<div onClick={()=>setSelectedMonth(currentMonth())} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"10px 14px",background:T.warning+"15",border:`1px solid ${T.warning}30`,borderRadius:14,marginBottom:18,cursor:"pointer"}}>
@@ -2246,6 +2301,9 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       </>}
     </div>
 
+    {/* — zone spacer — */}
+    <div style={{height:16}}/>
+
     {/* 6-MONTH STACKED BAR — Bills / Spent / Kept comparison ──────────────────*/}
     {monthlySavings.filter(m=>m.hasData).length>=2&&(()=>{
       // Find max bar width (= max of total displayed widths = max of (bills+spent+max(0,kept)) or bills+spent if over)
@@ -2291,197 +2349,31 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
             </div>;
           })}
         </div>
+        {/* Recent activity footer — merged in from former Across-all-months card */}
+        {(()=>{
+          const pts=monthlySavings.filter(p=>p.hasData);
+          if(pts.length<2) return null;
+          const last3=pts.slice(-3);
+          const avg3=last3.reduce((s,p)=>s+p.spent,0)/Math.max(1,last3.length);
+          const monthTops=pts.map(p=>{
+            const md0=monthlyData[p.month]||{};
+            const cats={}; (md0.txs||[]).forEach(t=>{ if(t.amount>0){ cats[t.category]=(cats[t.category]||0)+effectiveAmount(t); } });
+            const entries=Object.entries(cats).sort((a,b)=>b[1]-a[1]);
+            return entries[0]?entries[0][0]:null;
+          }).filter(Boolean);
+          const topCounts={};
+          monthTops.forEach(c=>{topCounts[c]=(topCounts[c]||0)+1;});
+          const topEntry=Object.entries(topCounts).sort((a,b)=>b[1]-a[1])[0];
+          const topCat=topEntry?topEntry[0]:null;
+          const topN=topEntry?topEntry[1]:0;
+          return <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${T.borderSoft}`,fontSize:11,color:T.textSecondary,lineHeight:1.5}}>
+            Averaging <span style={{fontFamily:"'DM Mono'",fontWeight:700,color:T.textPrimary}}>{fmt(avg3)}</span> spent / month{topCat&&topN>=2?<> · top: <span style={{fontWeight:700,color:T.textPrimary}}>{topCat.split(" ").slice(1).join(" ")||topCat}</span> ({topN}/{pts.length} months)</>:null}
+          </div>;
+        })()}
       </div>;
     })()}
 
-    {/* ── Across all months ── (cross-month section, independent of selectedMonth) */}
-    {spendingTrend.filter(p=>p.hasData).length>=2&&(()=>{
-      const pts=spendingTrend.filter(p=>p.hasData);
-      const last3=pts.slice(-3);
-      const avg3=last3.length>0?last3.reduce((s,p)=>s+p.total,0)/last3.length:0;
-      const monthTops=pts.map(p=>{
-        const entries=Object.entries(p.byCat).sort((a,b)=>b[1]-a[1]);
-        return entries[0]?entries[0][0]:null;
-      }).filter(Boolean);
-      const topCounts={};
-      monthTops.forEach(c=>{topCounts[c]=(topCounts[c]||0)+1;});
-      const topCatEntry=Object.entries(topCounts).sort((a,b)=>b[1]-a[1])[0];
-      const topCat=topCatEntry?topCatEntry[0]:null;
-      const topCatN=topCatEntry?topCatEntry[1]:0;
-      return <div style={{marginBottom:24}}>
-        <div style={{fontSize:11,color:T.textMuted,fontWeight:700,letterSpacing:0.7,textTransform:"uppercase",marginBottom:10,padding:"0 2px"}}>Across all months</div>
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {renderSpendingTrendChart()}
-          <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:"14px 16px",boxShadow:T.cardShadow,display:"flex",gap:14,alignItems:"center"}}>
-            <div style={{width:36,height:36,borderRadius:18,background:T.accentSoft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>🗓</div>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:13,fontWeight:600,color:T.textPrimary,marginBottom:2}}>Recent activity</div>
-              <div style={{fontSize:11,color:T.textSecondary,lineHeight:1.5}}>
-                Averaging <span style={{fontFamily:"'DM Mono'",fontWeight:700,color:T.textPrimary}}>{fmt(avg3)}</span>/month over your last {last3.length} months
-                {topCat&&topCatN>=2&&<>. Top category: <span style={{fontWeight:700}}>{topCat.split(" ").slice(1).join(" ")||topCat}</span> ({topCatN} of {pts.length} months)</>}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>;
-    })()}
 
-    {/* Goal emphasis card (different for each goal type) */}
-    {profile.goal&&(()=>{
-      const g=profile.goal;
-      const sym=CURRENCY_SYMBOLS[profile?.currency||"SGD"];
-      // Save more — savings rate progress + monthly target if income known
-      if(g.type==="save_more"){
-        const savRate=incTotal>0?(saved/incTotal*100):null;
-        if(savRate===null) return null;
-        const goalRate=20; // 20% reasonable default goal
-        const onTrack=savRate>=goalRate;
-        const ringPct=Math.max(0,Math.min(1,savRate/Math.max(goalRate,1)));
-        return <div onClick={()=>setSubScreen("insights")} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:"16px 18px",marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer",display:"flex",alignItems:"center",gap:14}}>
-          {/* Ring */}
-          <svg width="64" height="64" viewBox="0 0 64 64" style={{flexShrink:0}}>
-            <circle cx="32" cy="32" r="26" stroke={T.borderSoft} strokeWidth="6" fill="none"/>
-            <circle cx="32" cy="32" r="26" stroke={onTrack?T.accent:T.warning} strokeWidth="6" fill="none" strokeDasharray={`${ringPct*163.36} 163.36`} strokeDashoffset="0" strokeLinecap="round" transform="rotate(-90 32 32)"/>
-            <text x="32" y="36" textAnchor="middle" fontSize="14" fontWeight="700" fill={T.textPrimary} fontFamily="'Bricolage Grotesque','DM Sans',sans-serif">{savRate.toFixed(0)}%</text>
-          </svg>
-          <div style={{flex:1,minWidth:0}}>
-            <MicroLabel style={{marginBottom:4}}>SAVE MORE · GOAL {goalRate}%</MicroLabel>
-            <div style={{fontSize:14,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>{onTrack?"On track":"Below target"}</div>
-            <div style={{fontSize:11,color:T.textSecondary,marginTop:2,lineHeight:1.4}}>{onTrack?`${fmt(saved)} saved · ${(savRate-goalRate).toFixed(0)} points above goal`:`${fmt(saved)} saved · ${fmt(incTotal*goalRate/100-saved)} more to hit goal`}</div>
-          </div>
-        </div>;
-      }
-      // Get out of debt — debt remaining + projected payoff
-      if(g.type==="get_out_of_debt"){
-        const totalDebt=+g.params?.totalDebt||0;
-        if(totalDebt<=0) return null;
-        // Use last 3 months avg saved as monthly payoff capacity
-        const recent=monthlySavings.filter(m=>m.hasData&&!m.isCurrent).slice(-3);
-        const avgNet=recent.length>0?recent.reduce((s,m)=>s+m.saved,0)/recent.length:0;
-        const monthsLeft=avgNet>0?Math.ceil(totalDebt/avgNet):null;
-        const payoffDate=monthsLeft?new Date(new Date().setMonth(new Date().getMonth()+monthsLeft)):null;
-        return <div onClick={()=>setSubScreen("insights")} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:"16px 18px",marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer"}}>
-          <MicroLabel style={{marginBottom:6}}>DEBT-FREE PLAN</MicroLabel>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
-            <div style={{fontSize:24,fontWeight:800,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif",letterSpacing:-0.8}}>{fmt(totalDebt)}</div>
-            <div style={{fontSize:11,color:T.textMuted}}>remaining</div>
-          </div>
-          {monthsLeft?<div style={{fontSize:12,color:T.textSecondary,lineHeight:1.5}}>At your recent pace ({fmt(avgNet)}/mo net), you'd be debt-free by <span style={{fontWeight:700,color:T.accent}}>{payoffDate.toLocaleDateString("en-SG",{month:"short",year:"numeric"})}</span> ({monthsLeft} month{monthsLeft!==1?"s":""}).</div>
-            :<div style={{fontSize:12,color:T.textMuted,lineHeight:1.5}}>Save more each month to project a payoff date.</div>}
-        </div>;
-      }
-      // Understand spending — surface most active insight
-      if(g.type==="understand_spending"){
-        // Pick the most "interesting" ready insight that isn't already on the visible list
-        const candidates=insightCatalog.filter(i=>i.ready&&i.renderHome&&(i.id==="category_vs_usual"||i.id==="highest_category"));
-        if(candidates.length===0) return null;
-        const ins=candidates[0];
-        return <div onClick={()=>setSubScreen("insights")} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer"}}>
-          <div style={{padding:"10px 14px 0",fontSize:11,color:T.textMuted,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4}}>WORTH NOTING</div>
-          {ins.renderHome({T,fmt})}
-        </div>;
-      }
-      // Spend less on a category — daily-budget-remaining
-      if(g.type==="spend_less_on"){
-        const cat=g.params?.category;
-        const cap=+g.params?.cap||0;
-        if(!cat) return null;
-        const catSpent=Math.abs((txs||[]).filter(t=>t.category===cat&&t.amount>0).reduce((s,t)=>s+effectiveAmount(t),0));
-        const today=new Date(); const dayOfM=today.getDate(); const dim=new Date(today.getFullYear(),today.getMonth()+1,0).getDate();
-        const daysLeft=Math.max(0,dim-dayOfM);
-        const remaining=cap>0?Math.max(0,cap-catSpent):null;
-        const dailyAllowed=remaining&&daysLeft>0?remaining/daysLeft:null;
-        const pct=cap>0?Math.min(1,catSpent/cap):0;
-        const over=cap>0&&catSpent>cap;
-        return <div onClick={()=>setSubScreen("insights")} style={{background:T.surface,border:`1px solid ${over?T.negative+"40":T.border}`,borderRadius:18,padding:"14px 16px",marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
-            <MicroLabel>SPEND LESS ON {cat.split(" ").slice(1).join(" ").toUpperCase()||cat}</MicroLabel>
-            <span style={{fontFamily:"'DM Mono'",fontSize:11,color:T.textMuted}}>{daysLeft} days left</span>
-          </div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
-            <span style={{fontSize:20,fontWeight:800,color:over?T.negative:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif",letterSpacing:-0.6}}>{fmt(catSpent)}</span>
-            {cap>0&&<span style={{fontSize:12,color:T.textMuted}}>of {fmt(cap)}</span>}
-          </div>
-          {cap>0&&<div style={{height:5,background:T.borderSoft,borderRadius:4,overflow:"hidden",marginBottom:8}}>
-            <div style={{height:"100%",width:`${pct*100}%`,background:over?T.negative:pct>0.8?T.warning:T.accent,borderRadius:4,transition:"width .3s"}}/>
-          </div>}
-          {dailyAllowed!==null&&!over&&<div style={{fontSize:11,color:T.textSecondary}}>{fmt(dailyAllowed)}/day for the rest of the month keeps you under.</div>}
-          {over&&<div style={{fontSize:11,color:T.negative,fontWeight:600}}>Over by {fmt(catSpent-cap)} this month.</div>}
-          {!cap&&<div style={{fontSize:11,color:T.textMuted}}>Set a monthly cap in You → Goal to track this.</div>}
-        </div>;
-      }
-      return null;
-    })()}
-
-    {/* 6-MONTH TREND — line chart */}
-    {monthlySavings.filter(m=>m.hasData).length>=2&&(()=>{
-      const points=monthlySavings;
-      const W=320, H=110, padX=14, padY=18;
-      const innerW=W-padX*2, innerH=H-padY*2;
-      const values=points.flatMap(p=>[p.saved,p.projected].filter(v=>v!=null));
-      const max=Math.max(...values,0);
-      const min=Math.min(...values,0);
-      const range=Math.max(1,max-min);
-      const xFor=i=>padX+(points.length<=1?innerW/2:(i/(points.length-1))*innerW);
-      const yFor=v=>padY+innerH-((v-min)/range)*innerH;
-      const zeroY=yFor(0);
-      // Build solid path (only points with data, ending at last full month or current actual)
-      const solidPts=points.map((p,i)=>p.hasData?{x:xFor(i),y:yFor(p.saved),i,p}:null).filter(Boolean);
-      const solidPath=solidPts.map((pt,i)=>`${i===0?"M":"L"}${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`).join(" ");
-      // Build dashed projection segment if current month has projected
-      const curIdx=points.findIndex(p=>p.isCurrent);
-      const cur=points[curIdx];
-      let projPath=null, projEndPt=null;
-      if(cur&&cur.projected!=null&&cur.hasData){
-        // Dashed line from current actual to projected
-        projEndPt={x:xFor(curIdx),y:yFor(cur.projected)};
-        const startPt={x:xFor(curIdx),y:yFor(cur.saved)};
-        projPath=`M${startPt.x.toFixed(1)} ${startPt.y.toFixed(1)} L${projEndPt.x.toFixed(1)} ${projEndPt.y.toFixed(1)}`;
-      }
-      const sym=CURRENCY_SYMBOLS[profile?.currency||"SGD"];
-      const fmtCompact=v=>{ const a=Math.abs(v); if(a>=1000) return `${v<0?"-":""}${sym}${(a/1000).toFixed(a>=10000?0:1)}k`; return `${v<0?"-":""}${sym}${a.toFixed(0)}`; };
-      const lastSaved=cur?.hasData?cur.saved:(solidPts.length?solidPts[solidPts.length-1].p.saved:0);
-      const prevPt=solidPts.length>=2?solidPts[solidPts.length-2]:null;
-      const trendUp=prevPt?lastSaved>=prevPt.p.saved:true;
-
-      return <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:"14px 16px 10px",marginBottom:12,boxShadow:T.cardShadow}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10}}>
-          <div>
-            <MicroLabel style={{marginBottom:2}}>6-MONTH TREND</MicroLabel>
-            <div style={{fontSize:11,color:T.textMuted}}>{trendUp?"↑ trending up":"↓ trending down"}</div>
-          </div>
-          <div style={{textAlign:"right"}}>
-            <div style={{fontSize:11,color:T.textMuted}}>Avg saved</div>
-            <div style={{fontSize:13,fontFamily:"'DM Mono'",fontWeight:700,color:T.textPrimary}}>{fmtCompact(solidPts.reduce((s,p)=>s+p.p.saved,0)/Math.max(1,solidPts.length))}</div>
-          </div>
-        </div>
-        <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{display:"block",overflow:"visible"}}>
-          {/* Zero baseline */}
-          {min<0&&zeroY>=padY&&zeroY<=H-padY&&<line x1={padX} y1={zeroY} x2={W-padX} y2={zeroY} stroke={T.border} strokeWidth="1" strokeDasharray="2,3"/>}
-          {/* Solid path */}
-          {solidPath&&<path d={solidPath} fill="none" stroke={T.accent} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>}
-          {/* Projection */}
-          {projPath&&<path d={projPath} fill="none" stroke={T.accent} strokeWidth="2" strokeDasharray="4,4" strokeLinecap="round" opacity="0.55"/>}
-          {/* Points */}
-          {solidPts.map((pt,i)=><g key={i} style={{cursor:"pointer"}} onClick={()=>setSelectedMonth(pt.p.month)}>
-            <circle cx={pt.x} cy={pt.y} r="11" fill="transparent"/>
-            <circle cx={pt.x} cy={pt.y} r={pt.p.month===selectedMonth?5:3.5} fill={pt.p.month===selectedMonth?T.accent:T.surface} stroke={T.accent} strokeWidth="2"/>
-          </g>)}
-          {/* Projected dot */}
-          {projEndPt&&<circle cx={projEndPt.x} cy={projEndPt.y} r="3" fill={T.surface} stroke={T.accent} strokeWidth="2" opacity="0.55"/>}
-          {/* X-axis month labels */}
-          {points.map((p,i)=>{
-            const isSel=p.month===selectedMonth;
-            const lbl=monthLabelShort(p.month).split(" ")[0]; // "Apr"
-            return <text key={`l${i}`} x={xFor(i)} y={H-3} textAnchor="middle" fontSize="9" fill={isSel?T.accent:T.textMuted} fontFamily="DM Mono" fontWeight={isSel?"700":"500"}>{lbl}</text>;
-          })}
-        </svg>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8,fontSize:10,color:T.textMuted}}>
-          <span>Tap a point to switch month</span>
-          {projEndPt&&<span><span style={{display:"inline-block",width:10,height:2,background:T.accent,opacity:0.55,verticalAlign:"middle",marginRight:4}}/>projected</span>}
-        </div>
-      </div>;
-    })()}
 
     {/* Daily spending chart for selected month — moved from Forecast modal */}
     {(()=>{
@@ -2589,6 +2481,95 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       </div>;
     })()}
 
+    {/* — zone spacer — */}
+    <div style={{height:16}}/>
+
+    {/* Goal emphasis card (different for each goal type) */}
+    {profile.goal&&(()=>{
+      const g=profile.goal;
+      const sym=CURRENCY_SYMBOLS[profile?.currency||"SGD"];
+      // Save more — savings rate progress + monthly target if income known
+      if(g.type==="save_more"){
+        const savRate=incTotal>0?(saved/incTotal*100):null;
+        if(savRate===null) return null;
+        const goalRate=20; // 20% reasonable default goal
+        const onTrack=savRate>=goalRate;
+        const ringPct=Math.max(0,Math.min(1,savRate/Math.max(goalRate,1)));
+        return <div onClick={()=>setSubScreen("insights")} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:"16px 18px",marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer",display:"flex",alignItems:"center",gap:14}}>
+          {/* Ring */}
+          <svg width="64" height="64" viewBox="0 0 64 64" style={{flexShrink:0}}>
+            <circle cx="32" cy="32" r="26" stroke={T.borderSoft} strokeWidth="6" fill="none"/>
+            <circle cx="32" cy="32" r="26" stroke={onTrack?T.accent:T.warning} strokeWidth="6" fill="none" strokeDasharray={`${ringPct*163.36} 163.36`} strokeDashoffset="0" strokeLinecap="round" transform="rotate(-90 32 32)"/>
+            <text x="32" y="36" textAnchor="middle" fontSize="14" fontWeight="700" fill={T.textPrimary} fontFamily="'Bricolage Grotesque','DM Sans',sans-serif">{savRate.toFixed(0)}%</text>
+          </svg>
+          <div style={{flex:1,minWidth:0}}>
+            <MicroLabel style={{marginBottom:4}}>SAVE MORE · GOAL {goalRate}%</MicroLabel>
+            <div style={{fontSize:14,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>{onTrack?"On track":"Below target"}</div>
+            <div style={{fontSize:11,color:T.textSecondary,marginTop:2,lineHeight:1.4}}>{onTrack?`${fmt(saved)} saved · ${(savRate-goalRate).toFixed(0)} points above goal`:`${fmt(saved)} saved · ${fmt(incTotal*goalRate/100-saved)} more to hit goal`}</div>
+          </div>
+        </div>;
+      }
+      // Get out of debt — debt remaining + projected payoff
+      if(g.type==="get_out_of_debt"){
+        const totalDebt=+g.params?.totalDebt||0;
+        if(totalDebt<=0) return null;
+        // Use last 3 months avg saved as monthly payoff capacity
+        const recent=monthlySavings.filter(m=>m.hasData&&!m.isCurrent).slice(-3);
+        const avgNet=recent.length>0?recent.reduce((s,m)=>s+m.saved,0)/recent.length:0;
+        const monthsLeft=avgNet>0?Math.ceil(totalDebt/avgNet):null;
+        const payoffDate=monthsLeft?new Date(new Date().setMonth(new Date().getMonth()+monthsLeft)):null;
+        return <div onClick={()=>setSubScreen("insights")} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:"16px 18px",marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer"}}>
+          <MicroLabel style={{marginBottom:6}}>DEBT-FREE PLAN</MicroLabel>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
+            <div style={{fontSize:24,fontWeight:800,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif",letterSpacing:-0.8}}>{fmt(totalDebt)}</div>
+            <div style={{fontSize:11,color:T.textMuted}}>remaining</div>
+          </div>
+          {monthsLeft?<div style={{fontSize:12,color:T.textSecondary,lineHeight:1.5}}>At your recent pace ({fmt(avgNet)}/mo net), you'd be debt-free by <span style={{fontWeight:700,color:T.accent}}>{payoffDate.toLocaleDateString("en-SG",{month:"short",year:"numeric"})}</span> ({monthsLeft} month{monthsLeft!==1?"s":""}).</div>
+            :<div style={{fontSize:12,color:T.textMuted,lineHeight:1.5}}>Save more each month to project a payoff date.</div>}
+        </div>;
+      }
+      // Understand spending — surface most active insight
+      if(g.type==="understand_spending"){
+        // Pick the most "interesting" ready insight that isn't already on the visible list
+        const candidates=insightCatalog.filter(i=>i.ready&&i.renderHome&&(i.id==="category_vs_usual"||i.id==="highest_category"));
+        if(candidates.length===0) return null;
+        const ins=candidates[0];
+        return <div onClick={()=>setSubScreen("insights")} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer"}}>
+          <div style={{padding:"10px 14px 0",fontSize:11,color:T.textMuted,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4}}>WORTH NOTING</div>
+          {ins.renderHome({T,fmt})}
+        </div>;
+      }
+      // Spend less on a category — daily-budget-remaining
+      if(g.type==="spend_less_on"){
+        const cat=g.params?.category;
+        const cap=+g.params?.cap||0;
+        if(!cat) return null;
+        const catSpent=Math.abs((txs||[]).filter(t=>t.category===cat&&t.amount>0).reduce((s,t)=>s+effectiveAmount(t),0));
+        const today=new Date(); const dayOfM=today.getDate(); const dim=new Date(today.getFullYear(),today.getMonth()+1,0).getDate();
+        const daysLeft=Math.max(0,dim-dayOfM);
+        const remaining=cap>0?Math.max(0,cap-catSpent):null;
+        const dailyAllowed=remaining&&daysLeft>0?remaining/daysLeft:null;
+        const pct=cap>0?Math.min(1,catSpent/cap):0;
+        const over=cap>0&&catSpent>cap;
+        return <div onClick={()=>setSubScreen("insights")} style={{background:T.surface,border:`1px solid ${over?T.negative+"40":T.border}`,borderRadius:18,padding:"14px 16px",marginBottom:12,boxShadow:T.cardShadow,cursor:"pointer"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
+            <MicroLabel>SPEND LESS ON {cat.split(" ").slice(1).join(" ").toUpperCase()||cat}</MicroLabel>
+            <span style={{fontFamily:"'DM Mono'",fontSize:11,color:T.textMuted}}>{daysLeft} days left</span>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
+            <span style={{fontSize:20,fontWeight:800,color:over?T.negative:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif",letterSpacing:-0.6}}>{fmt(catSpent)}</span>
+            {cap>0&&<span style={{fontSize:12,color:T.textMuted}}>of {fmt(cap)}</span>}
+          </div>
+          {cap>0&&<div style={{height:5,background:T.borderSoft,borderRadius:4,overflow:"hidden",marginBottom:8}}>
+            <div style={{height:"100%",width:`${pct*100}%`,background:over?T.negative:pct>0.8?T.warning:T.accent,borderRadius:4,transition:"width .3s"}}/>
+          </div>}
+          {dailyAllowed!==null&&!over&&<div style={{fontSize:11,color:T.textSecondary}}>{fmt(dailyAllowed)}/day for the rest of the month keeps you under.</div>}
+          {over&&<div style={{fontSize:11,color:T.negative,fontWeight:600}}>Over by {fmt(catSpent-cap)} this month.</div>}
+          {!cap&&<div style={{fontSize:11,color:T.textMuted}}>Set a monthly cap in You → Goal to track this.</div>}
+        </div>;
+      }
+      return null;
+    })()}
     {/* Where you'll likely land — current month only (moved from Forecast modal) */}
     {isCurMonth&&dayOfMonth>5&&byCat.length>0&&(()=>{
       const projByCat=byCat.slice(0,4).map(([cat,amt])=>({cat,actual:Math.abs(amt),projected:Math.abs(amt)*(daysInMonth/dayOfMonth)}));
@@ -2631,6 +2612,9 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         {ins.renderHome({T,fmt})}
       </div>)}
     </div>}
+
+    {/* — zone spacer — */}
+    <div style={{height:16}}/>
 
     {/* Subscriptions insight — promoted to Home */}
     {detectedSubscriptions.length>0&&(()=>{
@@ -2745,6 +2729,8 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       <div style={{fontSize:12,color:T.textSecondary,lineHeight:1.6,maxWidth:260,margin:"0 auto"}}>Upload a bank statement to extract everything in one go, or quick-add a transaction by hand.</div>
       <div style={{marginTop:14,display:"inline-flex",alignItems:"center",gap:6,padding:"8px 16px",background:T.accent,color:"#fff",borderRadius:20,fontSize:12,fontWeight:600}}>Add transactions →</div>
     </div>}
+
+    </>}
 
     {/* Privacy badge */}
     <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginTop:24,fontSize:10,color:T.textMuted,letterSpacing:0.5}}>
@@ -2974,8 +2960,16 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
             {lbl}
           </button>;
         })}
-        {/* Floating + button — anchored to right side, raised */}
-        <button onClick={()=>{setAddMode("choose");setSubScreen("add");}} style={{position:"absolute",right:18,top:-26,width:56,height:56,borderRadius:28,background:T.accent,border:`4px solid ${T.bg}`,color:"#fff",fontSize:28,fontWeight:300,cursor:"pointer",boxShadow:`0 6px 20px ${T.accent}55`,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1,paddingBottom:4,fontFamily:"inherit"}}>+</button>
+        {/* Floating + button with permanent label + first-time coachmark */}
+        <div style={{position:"absolute",right:18,top:-26,display:"flex",flexDirection:"column",alignItems:"center"}}>
+          {showAddCoachmark&&<div onClick={dismissAddCoachmark} style={{position:"absolute",right:64,top:8,background:T.textPrimary,color:T.bg,padding:"10px 14px",borderRadius:12,fontSize:12,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",boxShadow:"0 6px 20px rgba(0,0,0,0.25)",zIndex:60,fontFamily:"inherit",lineHeight:1.4,maxWidth:200,whiteSpace:"normal",textAlign:"left"}}>
+            <div style={{marginBottom:2}}>👋 Start here</div>
+            <div style={{fontSize:11,fontWeight:500,opacity:0.85}}>Upload a statement or add a transaction</div>
+            <div style={{position:"absolute",right:-6,top:14,width:0,height:0,borderTop:"6px solid transparent",borderBottom:"6px solid transparent",borderLeft:`6px solid ${T.textPrimary}`}}/>
+          </div>}
+          <button onClick={()=>{setAddMode("choose");setSubScreen("add");dismissAddCoachmark();}} style={{width:56,height:56,borderRadius:28,background:T.accent,border:`4px solid ${T.bg}`,color:"#fff",fontSize:28,fontWeight:300,cursor:"pointer",boxShadow:`0 6px 20px ${T.accent}55`,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1,paddingBottom:4,fontFamily:"inherit"}}>+</button>
+          <div style={{fontSize:9,fontWeight:700,color:T.accent,marginTop:2,letterSpacing:0.3,fontFamily:"'DM Mono',monospace",textTransform:"uppercase",whiteSpace:"nowrap"}}>Add Transactions</div>
+        </div>
       </div>
     </div>
   </ThemeCtx.Provider>;
