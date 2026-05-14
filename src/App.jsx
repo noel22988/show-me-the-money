@@ -679,6 +679,8 @@ export default function App(){
   // Subscriptions editor — null = list view, "new" = adding, or {id} = editing existing
   const [subEditor,setSubEditor]=useState(null);
   const [subDraft,setSubDraft]=useState(null);
+  // Category-budgets draft (keyed by category name)
+  const [budgetsDraft,setBudgetsDraft]=useState(null);
   const toggleMoneySection=key=>setMoneyCollapsed(c=>({...c,[key]:!c[key]}));
   // First-time + button coachmark — shown once per device
   const [showAddCoachmark,setShowAddCoachmark]=useState(false);
@@ -1815,6 +1817,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       <SettingsGroup title="Personalisation">
         <SettingsRow icon="🎨" label="Theme" desc={`${LIGHT_PRESETS.concat(DARK_PRESETS).find(p=>p.accent===youAccent&&p.bg===youBg)?.name||"Custom"}`} onClick={()=>setSubScreen("theme")}/>
         <SettingsRow icon="✨" label="Insights" desc={(()=>{const n=(profile.insightPrefs||[]).length;return n===0?"None enabled":n===1?"1 enabled":`${n} enabled`;})()} onClick={()=>setSubScreen("insights")}/>
+        <SettingsRow icon="💸" label="Category budgets" desc={(()=>{const bs=profile.budgets||{};const keys=Object.keys(bs).filter(k=>+bs[k]>0);if(keys.length===0) return "Set monthly spending limits";const total=keys.reduce((s,k)=>s+(+bs[k]||0),0);return `${keys.length} set · ${fmt(total)}/mo total`;})()} onClick={()=>setSubScreen("budgets")}/>
       </SettingsGroup>
 
       <SettingsGroup title="Privacy & Data">
@@ -1913,6 +1916,95 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         })}
       </div>}
       {trendCats.length>6&&<div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${T.borderSoft}`,fontSize:11,color:T.textMuted,textAlign:"center"}}>{trendCats.length} categories shown — clear some for per-line averages</div>}
+    </div>;
+  };
+
+  // ── BUDGETS settings subscreen ─────────────────────────────────────────────
+  const BudgetsScreen=()=>{
+    const allCats=[...CATS,...FIXED_CATS]; // include all categories user can spend on
+    const draft=budgetsDraft||(profile.budgets||{});
+    const setVal=(cat,val)=>{
+      const next={...draft,[cat]:val};
+      setBudgetsDraft(next);
+    };
+    const saveAll=()=>{
+      // Clean: drop empty/zero entries
+      const cleaned={};
+      Object.entries(draft).forEach(([k,v])=>{
+        const n=parseFloat(v);
+        if(!isNaN(n)&&n>0) cleaned[k]=n;
+      });
+      saveProfile({...profile,budgets:cleaned});
+      setBudgetsDraft(null);
+      showToast("✓ Budgets updated");
+    };
+    const clearAll=()=>{
+      if(!confirm("Clear all category budgets?")) return;
+      saveProfile({...profile,budgets:{}});
+      setBudgetsDraft(null);
+      showToast("Budgets cleared");
+    };
+    // Current spending for each cat this month (for context)
+    const curByCat={};
+    (txs||[]).forEach(t=>{ if(t.amount>0){ curByCat[t.category]=(curByCat[t.category]||0)+effectiveAmount(t); } });
+
+    const setCount=Object.entries(draft).filter(([,v])=>+v>0).length;
+    const totalCap=Object.entries(draft).reduce((s,[,v])=>s+(+v||0),0);
+    const dirty=JSON.stringify(draft)!==JSON.stringify(profile.budgets||{});
+
+    const inpS={padding:"8px 10px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:8,color:T.textPrimary,fontFamily:"'DM Mono'",fontSize:13,fontWeight:600,outline:"none",width:"100%",boxSizing:"border-box",textAlign:"right"};
+
+    return <div>
+      <div style={{fontSize:13,color:T.textSecondary,marginBottom:18,lineHeight:1.6}}>Set a monthly cap for any category. When you near or pass a cap, we'll surface it in your Things to do and on the Forecast.</div>
+
+      {/* Summary */}
+      <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,padding:"14px 16px",marginBottom:14,boxShadow:T.cardShadow,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style={{fontSize:11,color:T.textMuted,fontFamily:"'DM Mono'",fontWeight:600,letterSpacing:0.4}}>{setCount} CATEGORIES WITH A CAP</div>
+          <div style={{fontSize:18,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif",marginTop:2}}>{fmt(totalCap)}<span style={{fontSize:12,color:T.textMuted,fontWeight:500,marginLeft:6}}>total cap / month</span></div>
+        </div>
+        {setCount>0&&<button onClick={clearAll} style={{background:"transparent",border:`1px solid ${T.negative}40`,color:T.negative,padding:"6px 10px",borderRadius:10,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Clear all</button>}
+      </div>
+
+      {/* Category rows */}
+      <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:18,overflow:"hidden",marginBottom:14,boxShadow:T.cardShadow}}>
+        {allCats.map((cat,i)=>{
+          const cur=curByCat[cat]||0;
+          const cap=parseFloat(draft[cat])||0;
+          const pct=cap>0?(cur/cap)*100:0;
+          const overBudget=cap>0&&cur>cap;
+          const warn=cap>0&&!overBudget&&pct>=80;
+          const col=overBudget?T.negative:warn?T.warning:cap>0?T.accent:T.textMuted;
+          return <div key={cat} style={{padding:"12px 14px",borderTop:i?`1px solid ${T.borderSoft}`:"none",display:"flex",flexDirection:"column",gap:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{width:32,height:32,borderRadius:10,background:(COLS[cat]||"#868E96")+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0}}>{cat.split(" ")[0]||"📦"}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:600,color:T.textPrimary,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{cat.split(" ").slice(1).join(" ")||cat}</div>
+                <div style={{fontSize:10,color:T.textMuted,fontFamily:"'DM Mono'",marginTop:1}}>{cur>0?`${fmt(cur)} so far`:"No spending yet"}</div>
+              </div>
+              <div style={{width:100,position:"relative"}}>
+                <span style={{position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",fontSize:11,color:T.textMuted,fontFamily:"'DM Mono'",pointerEvents:"none"}}>{CURRENCY_SYMBOLS[profile?.currency||"SGD"]}</span>
+                <input type="number" inputMode="decimal" placeholder="0" value={draft[cat]||""} onChange={e=>setVal(cat,e.target.value)} style={{...inpS,paddingLeft:22}}/>
+              </div>
+            </div>
+            {cap>0&&cur>0&&<div>
+              <div style={{height:4,background:T.borderSoft,borderRadius:4,overflow:"hidden"}}>
+                <div style={{height:"100%",width:`${Math.min(100,pct)}%`,background:col,borderRadius:4,transition:"width .25s"}}/>
+              </div>
+              <div style={{fontSize:10,color:col,marginTop:3,fontWeight:600}}>
+                {overBudget?`Over by ${fmt(cur-cap)} (${pct.toFixed(0)}%)`:warn?`${pct.toFixed(0)}% used`:`${pct.toFixed(0)}% used`}
+              </div>
+            </div>}
+          </div>;
+        })}
+      </div>
+
+      {/* Save button */}
+      {dirty&&<div style={{position:"sticky",bottom:18,zIndex:5}}>
+        <Btn onClick={saveAll}>Save changes</Btn>
+      </div>}
+
+      <div style={{fontSize:10,color:T.textMuted,textAlign:"center",lineHeight:1.5,padding:"4px 12px",marginTop:8}}>Leave blank for no limit. Caps reset each month.</div>
     </div>;
   };
 
@@ -2125,14 +2217,18 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       </div>
       {byCat.map(([cat,amt],i)=>{
         const pct=varTotal!==0?(Math.abs(amt)/Math.abs(varTotal)*100):0;
-        const budget=profile.budgets?.[cat];
-        const overBudget=budget>0&&Math.abs(amt)>=budget*0.8;
+        const budget=profile.budgets?.[cat]||0;
+        const budgetPct=budget>0?(Math.abs(amt)/budget)*100:0;
+        const overBudget=budget>0&&budgetPct>=100;
+        const warn=budget>0&&!overBudget&&budgetPct>=80;
+        const budgetBarColor=overBudget?T.negative:warn?T.warning:T.accent;
         return <div key={cat} style={{marginBottom:i<byCat.length-1?12:0}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
             <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0,flex:1}}>
               <span style={{fontSize:14,flexShrink:0}}>{cat.split(" ")[0]||"📦"}</span>
               <span style={{fontSize:12,color:T.textPrimary,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{cat.split(" ").slice(1).join(" ")||cat}</span>
-              {overBudget&&<span style={{fontSize:9,color:T.warning,fontWeight:700,letterSpacing:0.3,marginLeft:4,flexShrink:0}}>OVER</span>}
+              {overBudget&&<span style={{fontSize:9,color:T.negative,fontWeight:700,letterSpacing:0.3,marginLeft:4,flexShrink:0,padding:"1px 5px",background:T.negative+"15",borderRadius:5}}>OVER</span>}
+              {warn&&<span style={{fontSize:9,color:T.warning,fontWeight:700,letterSpacing:0.3,marginLeft:4,flexShrink:0,padding:"1px 5px",background:T.warning+"15",borderRadius:5}}>{budgetPct.toFixed(0)}%</span>}
             </div>
             <div style={{display:"flex",alignItems:"baseline",gap:6,flexShrink:0}}>
               <span style={{fontSize:13,fontFamily:"'DM Mono'",fontWeight:600,color:T.textPrimary}}>{fmt(Math.abs(amt))}</span>
@@ -2142,6 +2238,12 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           <div style={{height:5,background:T.borderSoft,borderRadius:5,overflow:"hidden"}}>
             <div style={{height:"100%",width:`${pct}%`,background:COLS[cat]||T.accent,borderRadius:5,transition:"width .4s"}}/>
           </div>
+          {budget>0&&<div style={{marginTop:4,display:"flex",alignItems:"center",gap:6}}>
+            <div style={{flex:1,height:3,background:T.borderSoft,borderRadius:3,overflow:"hidden"}}>
+              <div style={{height:"100%",width:`${Math.min(100,budgetPct)}%`,background:budgetBarColor,borderRadius:3,transition:"width .4s"}}/>
+            </div>
+            <span style={{fontSize:9,color:T.textMuted,fontFamily:"'DM Mono'",whiteSpace:"nowrap",flexShrink:0}}>{fmt(Math.abs(amt))} / {fmt(budget)}</span>
+          </div>}
         </div>;
       })}
     </div>}
@@ -2451,13 +2553,13 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       }
 
       // Build chart
-      const chartW=320, chartH=130, padX=14, padY=14, padBottom=22;
-      const innerW=chartW-padX*2, innerH=chartH-padY-padBottom;
+      const chartW=320, chartH=130, padLeft=38, padRight=10, padY=14, padBottom=22;
+      const innerW=chartW-padLeft-padRight, innerH=chartH-padY-padBottom;
       const allDailyVals=[];
       for(let d=1;d<=lastDataDay;d++) allDailyVals.push(byDayTotal[d]);
       trendCats.forEach(c=>{ if(byDayCat[c]){ for(let d=1;d<=lastDataDay;d++) allDailyVals.push(byDayCat[c][d]); } });
       const maxV=Math.max(...allDailyVals,1);
-      const xFor=d=>padX+((d-1)/Math.max(1,monthDIM-1))*innerW;
+      const xFor=d=>padLeft+((d-1)/Math.max(1,monthDIM-1))*innerW;
       const yFor=v=>padY+innerH-(v/maxV)*innerH;
       const buildDailyPath=(arr,limit)=>{
         const pts=[];
@@ -2498,7 +2600,15 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           {dailyCatsAvail.length>1&&<button onClick={()=>setTrendCats(allOn?[]:[...dailyCatsAvail])} style={{padding:"4px 10px",borderRadius:14,border:`1px dashed ${T.borderMid}`,background:"transparent",color:T.textSecondary,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",marginLeft:"auto"}}>{allOn?"Clear all":"Select all"}</button>}
         </div>}
         <svg width="100%" viewBox={`0 0 ${chartW} ${chartH}`} preserveAspectRatio="none" style={{display:"block",overflow:"visible"}}>
-          <line x1={padX} y1={padY+innerH} x2={chartW-padX} y2={padY+innerH} stroke={T.borderSoft} strokeWidth="1"/>
+          {/* Y axis gridlines + labels (0, mid, max) */}
+          {[0,0.5,1].map(frac=>{
+            const v=maxV*frac;
+            const y=yFor(v);
+            return <g key={frac}>
+              <line x1={padLeft} y1={y} x2={chartW-padRight} y2={y} stroke={T.borderSoft} strokeWidth="0.6" opacity={frac===0?0.9:0.5}/>
+              <text x={padLeft-4} y={y+3} textAnchor="end" fontSize="9" fill={T.textMuted} fontFamily="DM Mono" fontWeight="500">{fmtCompact2(v)}</text>
+            </g>;
+          })}
           <path d={totalPath} fill="none" stroke={T.accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
           {trendCats.filter(c=>byDayCat[c]).map(cat=>{
             const col=COLS[cat]||T.accent;
@@ -3063,9 +3173,9 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       {subScreen&&<div style={{position:"fixed",inset:0,background:T.bg,zIndex:200,overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
         <div style={{maxWidth:580,margin:"0 auto",padding:"8px 18px 24px"}}>
           <div style={{display:"flex",alignItems:"center",gap:8,padding:"12px 0 18px"}}>
-            <button onClick={()=>{setSubScreen(null);setAddMode("choose");setIbDraft(null);setGoalsDraft(null);setSubEditor(null);setSubDraft(null);}} style={{background:"none",border:"none",fontSize:24,color:T.textSecondary,cursor:"pointer",padding:"4px 8px",fontFamily:"inherit"}}>‹</button>
+            <button onClick={()=>{setSubScreen(null);setAddMode("choose");setIbDraft(null);setGoalsDraft(null);setSubEditor(null);setSubDraft(null);setBudgetsDraft(null);}} style={{background:"none",border:"none",fontSize:24,color:T.textSecondary,cursor:"pointer",padding:"4px 8px",fontFamily:"inherit"}}>‹</button>
             <div style={{fontSize:18,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>
-              {subScreen==="add"?"Add":subScreen==="upload"?"Upload statement":subScreen==="review"?"Quick review":subScreen==="subscriptions"?"Subscriptions":subScreen==="income-bills"?"Income & Bills":subScreen==="goals"?"Goals":subScreen==="theme"?"Theme":subScreen==="advanced"?"Advanced":subScreen==="search"?"Search":subScreen==="insights"?"Insights":""}
+              {subScreen==="add"?"Add":subScreen==="upload"?"Upload statement":subScreen==="review"?"Quick review":subScreen==="subscriptions"?"Subscriptions":subScreen==="income-bills"?"Income & Bills":subScreen==="goals"?"Goals":subScreen==="theme"?"Theme":subScreen==="advanced"?"Advanced":subScreen==="search"?"Search":subScreen==="insights"?"Insights":subScreen==="budgets"?"Category budgets":""}
             </div>
           </div>
           {subScreen==="add"&&AddChooserScreen()}
@@ -3078,6 +3188,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
           {subScreen==="advanced"&&AdvancedSection()}
           {subScreen==="search"&&SearchScreen()}
           {subScreen==="insights"&&InsightsScreen()}
+          {subScreen==="budgets"&&BudgetsScreen()}
         </div>
       </div>}
 
