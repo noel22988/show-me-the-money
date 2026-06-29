@@ -1165,7 +1165,22 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       for(const line of text.split("\n")){
         if(!line.startsWith("data: ")) continue;
         const d=line.slice(6).trim(); if(!d) continue;
-        try{ const p=JSON.parse(d); if(p.done&&p.content) finalData=p; if(p.error) throw new Error(p.error); }
+        try{
+          const p=JSON.parse(d);
+          if(p.done&&p.content) finalData=p;
+          if(p.error){
+            // Preserve full server-side error context for the diagnostic panel
+            const realMsg=p.detail||p.error;
+            const e=new Error(typeof realMsg==="string"?realMsg:JSON.stringify(realMsg));
+            e.detail=typeof p.detail==="string"?p.detail:p.detail?JSON.stringify(p.detail,null,2):null;
+            e.status=p.status||null;
+            // If detail looks like JSON, try to pretty-print it
+            if(e.detail){
+              try{ const parsed=JSON.parse(e.detail); e.detail=JSON.stringify(parsed,null,2); if(parsed.error?.message) e.message=parsed.error.message; }catch(_){}
+            }
+            throw e;
+          }
+        }
         catch(e){ if(e.message&&!e.message.startsWith("Unexpected")) throw e; }
       }
     }
