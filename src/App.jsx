@@ -1135,7 +1135,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     const controller=new AbortController();
     const timeoutId=setTimeout(()=>controller.abort(),290000);
     let res;
-    try{ res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:16000,messages:[{role:"user",content:body}]}),signal:controller.signal}); }
+    try{ res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:64000,messages:[{role:"user",content:body}]}),signal:controller.signal}); }
     finally{ clearTimeout(timeoutId); }
     if(!res.ok){
       let msg=`Server error ${res.status}`;
@@ -1187,8 +1187,24 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     if(!finalData) throw new Error("No response received from API");
     let raw=finalData.content?.map(b=>b.text||"").join("").trim().replace(/^```json|^```|```$/gm,"").trim();
     if(!raw||!raw.startsWith("[")) throw new Error("No valid JSON returned from API");
-    if(!raw.endsWith("]")){ const lb=raw.lastIndexOf("}"); if(lb!==-1) raw=raw.slice(0,lb+1)+"]"; else throw new Error("Incomplete response — try a smaller file"); }
-    return JSON.parse(raw);
+    if(!raw.endsWith("]")){
+      // Find the last fully-closed object (`}`) — anything after that is partial.
+      // This handles truncation mid-string, mid-key, etc., not just between objects.
+      const lb=raw.lastIndexOf("},");
+      if(lb!==-1){ raw=raw.slice(0,lb+1)+"]"; }
+      else{
+        const sb=raw.lastIndexOf("}");
+        if(sb!==-1) raw=raw.slice(0,sb+1)+"]";
+        else throw new Error("Incomplete response — try a smaller file");
+      }
+    }
+    try{ return JSON.parse(raw); }
+    catch(parseErr){
+      const tail=raw.slice(Math.max(0,raw.length-200));
+      const e=new Error(`Response cut off — the statement may be too large to parse in one go. Try splitting it.`);
+      e.detail=`JSON parse failed at position ${parseErr.message.match(/position (\d+)/)?.[1]||"?"} of ${raw.length} chars.\n\nLast 200 chars of response:\n${tail}`;
+      throw e;
+    }
   };
 
   const handleFile=async e=>{
