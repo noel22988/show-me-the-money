@@ -1135,7 +1135,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     const controller=new AbortController();
     const timeoutId=setTimeout(()=>controller.abort(),290000);
     let res;
-    try{ res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:16000,messages:[{role:"user",content:body}]}),signal:controller.signal}); }
+    try{ res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:16000,messages:[{role:"user",content:body}]}),signal:controller.signal}); }
     finally{ clearTimeout(timeoutId); }
     if(!res.ok){
       let msg=`Server error ${res.status}`;
