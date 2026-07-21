@@ -5,7 +5,7 @@
 // Money/You/Review/Upload screens are PLACEHOLDERS in this phase
 // ════════════════════════════════════════════════════════════════════════════
 
-import { useState, useMemo, useRef, useEffect, useCallback, createContext, useContext } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback, createContext, useContext, Fragment } from "react";
 import { PrivacyModal } from "./Landing.jsx";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -2337,10 +2337,10 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       </div>
       {!moneyCollapsed.income&&<>
         {incomeRows.map(({stream,amount})=>{
-          if(stream.type==="fixed") return <FixedIncomeRow key={stream.id} stream={stream} amount={amount}/>;
-          return <VarIncomeRow key={stream.id} stream={stream} amount={amount}/>;
+          if(stream.type==="fixed") return <Fragment key={stream.id}>{FixedIncomeRow({stream,amount})}</Fragment>;
+          return <Fragment key={stream.id}>{VarIncomeRow({stream,amount})}</Fragment>;
         })}
-        {oneoffEntries.map(o=><OneoffRow key={o.id} entry={o}/>)}
+        {oneoffEntries.map(o=><Fragment key={o.id}>{OneoffRow({entry:o})}</Fragment>)}
         {AddOneoffForm()}
       </>}
     </div>}
