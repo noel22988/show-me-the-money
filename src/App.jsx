@@ -1742,7 +1742,17 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
     const updF=(id,field,val)=>setDraft(p=>({...p,fixedCommitments:(p.fixedCommitments||[]).map(c=>c.id===id?{...c,[field]:val}:c)}));
     const addF=()=>setDraft(p=>({...p,fixedCommitments:[...(p.fixedCommitments||[]),{id:`c${Date.now()}`,name:"",amount:0,startFrom:"",endMonth:""}]}));
     const rmF=id=>setDraft(p=>({...p,fixedCommitments:(p.fixedCommitments||[]).filter(c=>c.id!==id)}));
-    const save=()=>{ saveProfile({...draft,onboarded:true}); setIbDraft(null); showToast("✓ Saved"); setSubScreen(null); };
+    const save=()=>{
+      // Coerce raw string amounts to numbers before persisting
+      const coerced={...draft,
+        incomeStreams:(draft.incomeStreams||[]).map(s=>({...s,defaultAmount:typeof s.defaultAmount==="string"?(parseFloat(s.defaultAmount)||0):(s.defaultAmount||0)})),
+        fixedCommitments:(draft.fixedCommitments||[]).map(c=>({...c,amount:typeof c.amount==="string"?(parseFloat(c.amount)||0):(c.amount||0)})),
+      };
+      saveProfile({...coerced,onboarded:true});
+      setIbDraft(null);
+      showToast("✓ Saved");
+      setSubScreen(null);
+    };
     const inpS={padding:"9px 11px",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:9,color:T.textPrimary,fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",boxSizing:"border-box"};
     return <div style={{padding:"4px 0"}}>
       <div style={{fontSize:11,color:T.textMuted,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",marginBottom:8}}>Income sources</div>
@@ -1754,7 +1764,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
         <div style={{display:"flex",borderRadius:8,overflow:"hidden",border:`1px solid ${T.border}`,marginBottom:8}}>
           {[["fixed","Fixed",T.info],["variable","Variable",T.warning]].map(([t,lbl,col])=><button key={t} onClick={()=>updS(s.id,"type",t)} style={{flex:1,padding:"7px 4px",background:s.type===t?col:"transparent",border:"none",color:s.type===t?"#fff":T.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:s.type===t?700:500}}>{lbl}</button>)}
         </div>
-        {s.type==="fixed"&&<input type="number" placeholder="Monthly amount" value={s.defaultAmount||""} onChange={e=>updS(s.id,"defaultAmount",parseFloat(e.target.value)||0)} style={inpS}/>}
+        {s.type==="fixed"&&<input type="number" inputMode="decimal" placeholder="Monthly amount" value={s.defaultAmount===0||s.defaultAmount===undefined?"":String(s.defaultAmount)} onChange={e=>updS(s.id,"defaultAmount",e.target.value)} onBlur={e=>{const v=parseFloat(e.target.value);updS(s.id,"defaultAmount",isNaN(v)?0:v);}} style={inpS}/>}
         {s.type==="variable"&&<div style={{fontSize:10,color:T.textMuted,fontStyle:"italic"}}>You'll enter the amount each month in Money.</div>}
       </div>)}
       <button onClick={addS} style={{width:"100%",padding:"10px",background:"transparent",border:`1px dashed ${T.borderMid}`,borderRadius:10,color:T.textMuted,fontFamily:"inherit",fontSize:12,cursor:"pointer",marginBottom:14}}>+ Add income source</button>
@@ -1763,7 +1773,7 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       {(draft.fixedCommitments||[]).map(c=><div key={c.id} style={{padding:"10px",background:T.surface2,borderRadius:12,marginBottom:8,border:`1px solid ${T.borderSoft}`}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 90px auto",gap:8,marginBottom:8,alignItems:"center"}}>
           <input placeholder="Name (e.g. Rent)" value={c.name||""} onChange={e=>updF(c.id,"name",e.target.value)} style={inpS}/>
-          <input type="number" placeholder="0" value={c.amount||""} onChange={e=>updF(c.id,"amount",parseFloat(e.target.value)||0)} style={{...inpS,textAlign:"right"}}/>
+          <input type="number" inputMode="decimal" placeholder="0" value={c.amount===0||c.amount===undefined?"":String(c.amount)} onChange={e=>updF(c.id,"amount",e.target.value)} onBlur={e=>{const v=parseFloat(e.target.value);updF(c.id,"amount",isNaN(v)?0:v);}} style={{...inpS,textAlign:"right"}}/>
           <button onClick={()=>rmF(c.id)} style={{background:"none",border:"none",color:T.textMuted,cursor:"pointer",fontSize:18,padding:"4px 6px",lineHeight:1}}>×</button>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
@@ -3261,7 +3271,18 @@ Return ONLY a valid JSON array. Each object: {"date":"YYYY-MM-DD","description":
       {subScreen&&<div style={{position:"fixed",inset:0,background:T.bg,zIndex:200,overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
         <div style={{maxWidth:580,margin:"0 auto",padding:"8px 18px 24px"}}>
           <div style={{display:"flex",alignItems:"center",gap:8,padding:"12px 0 18px"}}>
-            <button onClick={()=>{setSubScreen(null);setAddMode("choose");setIbDraft(null);setGoalsDraft(null);setSubEditor(null);setSubDraft(null);setBudgetsDraft(null);}} style={{background:"none",border:"none",fontSize:24,color:T.textSecondary,cursor:"pointer",padding:"4px 8px",fontFamily:"inherit"}}>‹</button>
+            <button onClick={()=>{
+              // Auto-save unsaved Income/Bills draft so users don't lose work when tapping ‹
+              if(ibDraft){
+                const coerced={...ibDraft,
+                  incomeStreams:(ibDraft.incomeStreams||[]).map(s=>({...s,defaultAmount:typeof s.defaultAmount==="string"?(parseFloat(s.defaultAmount)||0):(s.defaultAmount||0)})),
+                  fixedCommitments:(ibDraft.fixedCommitments||[]).map(c=>({...c,amount:typeof c.amount==="string"?(parseFloat(c.amount)||0):(c.amount||0)})),
+                };
+                saveProfile({...coerced,onboarded:true});
+                showToast("✓ Saved");
+              }
+              setSubScreen(null);setAddMode("choose");setIbDraft(null);setGoalsDraft(null);setSubEditor(null);setSubDraft(null);setBudgetsDraft(null);
+            }} style={{background:"none",border:"none",fontSize:24,color:T.textSecondary,cursor:"pointer",padding:"4px 8px",fontFamily:"inherit"}}>‹</button>
             <div style={{fontSize:18,fontWeight:700,color:T.textPrimary,fontFamily:"'Bricolage Grotesque','DM Sans',sans-serif"}}>
               {subScreen==="add"?"Add":subScreen==="upload"?"Upload statement":subScreen==="review"?"Quick review":subScreen==="subscriptions"?"Subscriptions":subScreen==="income-bills"?"Income & Bills":subScreen==="goals"?"Goals":subScreen==="theme"?"Theme":subScreen==="advanced"?"Advanced":subScreen==="search"?"Search":subScreen==="insights"?"Insights":subScreen==="budgets"?"Category budgets":""}
             </div>
